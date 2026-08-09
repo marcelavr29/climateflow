@@ -20,6 +20,6 @@ class ClimateFlowEntity(Entity):
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, coordinator.entry.entry_id)},
             name="ClimateFlow",
-            manufacturer="tbfapps",
+            manufacturer="APPTALE Apps",
             model="Climatizare pentru evenimente",
         )

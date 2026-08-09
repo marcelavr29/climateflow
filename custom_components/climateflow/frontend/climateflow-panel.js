@@ -252,6 +252,8 @@ class ClimateFlowPanel extends HTMLElement {
       alerts.push(`<div class="alert warn">🛡️ Cineva modifică repetat un aparat de la telecomandă — garda ia o pauză de 5 minute, apoi reia.</div>`);
     if (l.skip_next_armed)
       alerts.push(`<div class="alert info">⏭ Următorul eveniment va fi <b>sărit</b> — climatizarea nu va porni pentru el.</div>`);
+    if (l.transition_week)
+      alerts.push(`<div class="alert info">📅 Săptămâna aceasta e <b>săptămâna de tranziție</b> (duminica pică pe luna următoare) — se aplică excepțiile programului: joia nu se ține, în locul ei se ține vinerea.</div>`);
 
     return `
       <div class="statusbar">
@@ -530,9 +532,11 @@ class ClimateFlowPanel extends HTMLElement {
     if (h && h.error) history = `<div class="err">⚠️ ${esc(h.error)}</div>`;
     else if (h) {
       const rows = (h.records || [])
-        .filter((r) => r.type === "precondition")
+        .filter((r) => r.type === "precondition" || r.type === "boost")
         .map((r) => {
           const d = r.ts ? new Date(r.ts).toLocaleString("ro-RO", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
+          if (r.type === "boost")
+            return `<tr><td>${esc(d)}</td><td colspan="4">⚡ boost activat — ${esc(r.name || "")} <span class="muted">(${r.phase === "event" ? "în timpul evenimentului" : "în precondiționare"})</span></td></tr>`;
           const ok = r.on_time == null ? "—" : r.on_time ? `<span class="ok">✓ la timp</span>` : `<span class="late">✗ întârziat</span>`;
           return `<tr><td>${esc(d)}</td><td>${esc(r.name || "")}</td><td class="r">${fmt(r.minutes, " min", 0)}</td><td class="r">${r.rate != null ? fmt(r.rate, " °C/h", 2) : "—"}</td><td>${ok}</td></tr>`;
         })
@@ -542,11 +546,15 @@ class ClimateFlowPanel extends HTMLElement {
         ${rows}</table>`;
     }
 
+    const stats = (h && h.stats) || {};
     return `
       <div class="cards">
         <div class="card kv"><span>Eșantioane învățate</span><b>${l.sample_count != null ? l.sample_count : "—"}</b></div>
         <div class="card kv"><span>Punctualitate (30 zile)</span><b>${l.on_time_pct != null ? l.on_time_pct + "%" : "—"}</b></div>
         <div class="card kv"><span>Rata în condițiile curente</span><b>${fmt(l.learned_rate_current, " °C/h", 2)}</b></div>
+        <div class="card kv"><span>Evenimente (30 zile)</span><b>${stats.events_30d != null ? stats.events_30d : "—"}</b></div>
+        <div class="card kv"><span>Avans mediu folosit</span><b>${fmt(stats.avg_lead, " min", 0)}</b></div>
+        <div class="card kv"><span>Boost-uri (30 zile)</span><b>${stats.boost_count_30d != null ? stats.boost_count_30d : "—"}</b></div>
       </div>
       <h3>Rate învățate pe temperatura exterioară</h3>
       <div class="learn-grid">${modeBars}</div>

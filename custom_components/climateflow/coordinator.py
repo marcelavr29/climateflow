@@ -147,6 +147,9 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
         self._rates: dict = self._cache.get("rates", {})
         self._samples: list[dict] = self._cache.get("samples", [])
         self._records: list[dict] = self._cache.get("records", [])
+        # Contor cumulativ (listele de mai sus sunt trunchiate la 200) —
+        # senzorul „Eșantioane învățate” e TOTAL_INCREASING și nu are voie să scadă.
+        self._total_samples: int = self._cache.get("total_samples", 0)
 
         self.policy = guard.GuardPolicy()
         self._pending_reasserts: dict[str, CALLBACK_TYPE] = {}
@@ -174,12 +177,14 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
         self._rates = data.get("rates", self._rates)
         self._samples = data.get("samples", self._samples)
         self._records = data.get("records", self._records)
+        self._total_samples = data.get("total_samples", len(self._samples))
         self._cache_learning()
 
     def _cache_learning(self) -> None:
         self._cache["rates"] = self._rates
         self._cache["samples"] = self._samples
         self._cache["records"] = self._records
+        self._cache["total_samples"] = self._total_samples
 
     async def _save_learning(self) -> None:
         self._cache_learning()
@@ -188,6 +193,7 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
                 "rates": self._rates,
                 "samples": self._samples[-200:],
                 "records": self._records[-200:],
+                "total_samples": self._total_samples,
             }
         )
 
@@ -460,6 +466,7 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
                         active["escalated"] = True
                         active["boost_since"] = now
                         plan["mode"] = MODE_HEAT_BOOST
+                        self._record_boost(now, active, "preconditioning")
                         await self._command_mode(
                             MODE_HEAT_BOOST, self._precond_target(plan), fan_cap="high"
                         )
@@ -542,6 +549,7 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
             ):
                 active["event_boost"] = True
                 plan["mode"] = MODE_HEAT_BOOST
+                self._record_boost(now, active, "event")
                 fan_cap = self.get_str(VAL_FAN_CAP, DEFAULT_FAN_CAP)
                 await self._command_mode(MODE_HEAT_BOOST, plan["target"], fan_cap=fan_cap)
         else:
@@ -616,6 +624,7 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
         if rate is not None:
             band = thermal.band_key(active["outdoor_start"], mode)
             self._rates = thermal.update_rate(self._rates, mode, band, rate)
+            self._total_samples += 1
             self._samples.append(
                 {
                     "ts": now.isoformat(),
@@ -632,6 +641,19 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
             record["rate"] = round(rate, 2)
 
         self._records.append(record)
+        self._records = self._records[-200:]
+        self.hass.async_create_task(self._save_learning())
+
+    def _record_boost(self, now: dt.datetime, active: dict, phase: str) -> None:
+        """Consemnează o escaladare la boost (vizibilă în istoricul panoului)."""
+        self._records.append(
+            {
+                "type": "boost",
+                "ts": now.isoformat(),
+                "name": active.get("name", ""),
+                "phase": phase,
+            }
+        )
         self._records = self._records[-200:]
         self.hass.async_create_task(self._save_learning())
 
@@ -1024,8 +1046,9 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
             "mode": plan["mode"] if plan else None,
             "learned_rate_current": round(plan["rate"], 2) if plan else None,
             "rates": self._rates,
-            "sample_count": len(self._samples),
+            "sample_count": self._total_samples,
             "on_time_pct": self._on_time_pct(now),
+            "transition_week": schedule.is_month_transition(now.date()),
             "comfort_deficit": deficit,
             "guard_fighting": fighting,
             "skip_next_armed": bool(
@@ -1042,12 +1065,33 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
         self.async_set_updated_data(self._build_data())
 
     def history(self) -> dict:
-        """Istoric + învățare pentru panou/diagnostic."""
+        """Istoric + învățare + statistici agregate pentru panou/diagnostic."""
+        now = dt_util.now()
+        cutoff = now - dt.timedelta(days=30)
+
+        def _recent(kind: str) -> list[dict]:
+            out = []
+            for r in self._records:
+                if r.get("type") != kind:
+                    continue
+                ts = dt_util.parse_datetime(r.get("ts", ""))
+                if ts is not None and ts >= cutoff:
+                    out.append(r)
+            return out
+
+        preconds = _recent("precondition")
+        leads = [r["minutes"] for r in preconds if r.get("minutes")]
         return {
             "records": list(reversed(self._records[-50:])),
             "samples": list(reversed(self._samples[-50:])),
             "rates": self._rates,
-            "on_time_pct": self._on_time_pct(dt_util.now()),
+            "on_time_pct": self._on_time_pct(now),
+            "stats": {
+                "events_30d": len(preconds),
+                "avg_lead": round(sum(leads) / len(leads), 0) if leads else None,
+                "boost_count_30d": len(_recent("boost")),
+                "total_samples": self._total_samples,
+            },
         }
 
     # -------------------------------------------------------------- notificări

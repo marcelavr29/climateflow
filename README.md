@@ -69,6 +69,14 @@ Rata e o medie mobilă pe benzi de temperatură exterioară, per mod
 (`cool` / `heat_boiler` / `heat_boiler_boost`), învățată din fiecare precondiționare
 reușită. Până se adună eșantioane, se folosesc ratele implicite (numbers).
 
+## Documentație
+
+Ghidul complet (cum se calculează avansul, regula săptămânii de tranziție cu exemple,
+boost-ul de iarnă, garda, întrebări frecvente): [docs/ghid-climatizare.md](docs/ghid-climatizare.md).
+
+Pentru depanare: Setări → Dispozitive și servicii → ClimateFlow → ⋮ → *Descarcă
+diagnosticele* (dump complet: configurare, stare live, rate învățate, istoric).
+
 ## Teste
 
 ```bash

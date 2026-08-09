@@ -151,6 +151,7 @@ def make_coordinator(hass, *, season=SEASON_WINTER, indoor=19.0, outdoor=5.0,
     c._rates = {}
     c._samples = []
     c._records = []
+    c._total_samples = 0
     c.policy = GuardPolicy()
     c._pending_reasserts = {}
     c._unsub_climate = None
@@ -262,9 +263,18 @@ def test_event_entry_caps_fan_and_learns():
 
         # Eșantion capturat: 19→22 în 120 min ⇒ 1.5 °C/h, banda b3 (exterior 5°C).
         assert len(c._samples) == 1
+        assert c._total_samples == 1  # contorul cumulativ (TOTAL_INCREASING)
         assert c._samples[0]["rate"] == 1.5
         assert c._rates[MODE_HEAT_BOILER]["b3"] == 1.5
         assert c._records[-1]["on_time"] is True
+
+        # Statisticile agregate pentru panou.
+        stats = c.history()["stats"]
+        assert stats["total_samples"] == 1
+        assert stats["events_30d"] == 1
+        assert stats["avg_lead"] == 120.0
+        assert stats["boost_count_30d"] == 0
+        assert c._build_data()["transition_week"] in (True, False)
 
         # La eveniment temperatura comandată e ținta exactă (nu supra-ținta).
         assert hass.services.of("set_temperature")[-1][2]["temperature"] == 22.0

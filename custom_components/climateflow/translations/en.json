@@ -2,14 +2,14 @@
   "config": {
     "step": {
       "user": {
-        "title": "ClimateFlow — configurare",
-        "description": "Alege senzorii de temperatură și actuatoarele. Evenimentele se configurează după instalare.",
+        "title": "ClimateFlow — setup",
+        "description": "Pick the temperature sensors and the actuators. The event schedule comes pre-installed and can be adjusted later from the ClimateFlow panel.",
         "data": {
-          "indoor_sensor": "Senzor temperatură interior",
-          "outdoor_sensor": "Senzor temperatură exterior",
-          "ac_units": "Aere condiționate (climate)",
-          "boiler": "Centrală termică (climate, opțional)",
-          "notify_service": "Serviciu notificări (opțional, ex. mobile_app_telefon)"
+          "indoor_sensor": "Indoor temperature sensor",
+          "outdoor_sensor": "Outdoor temperature sensor",
+          "ac_units": "Air conditioners (climate)",
+          "boiler": "Central heating boiler (climate, optional)",
+          "notify_service": "Notification service (optional, e.g. mobile_app_phone)"
         }
       }
     }
@@ -17,13 +17,13 @@
   "options": {
     "step": {
       "init": {
-        "title": "ClimateFlow — setări generale",
+        "title": "ClimateFlow — general settings",
         "data": {
-          "indoor_sensor": "Senzor temperatură interior",
-          "outdoor_sensor": "Senzor temperatură exterior",
-          "ac_units": "Aere condiționate (climate)",
-          "boiler": "Centrală termică (climate, opțional)",
-          "notify_service": "Serviciu notificări (opțional)"
+          "indoor_sensor": "Indoor temperature sensor",
+          "outdoor_sensor": "Outdoor temperature sensor",
+          "ac_units": "Air conditioners (climate)",
+          "boiler": "Central heating boiler (climate, optional)",
+          "notify_service": "Notification service (optional)"
         }
       }
     }
