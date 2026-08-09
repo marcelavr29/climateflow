@@ -11,12 +11,16 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import ClimateFlowConfigEntry
 from .const import (
+    DEFAULT_EXTREME_COOL_C,
+    DEFAULT_EXTREME_HEAT_C,
     DEFAULT_MAX_LEAD_MIN,
     DEFAULT_OVERSHOOT_C,
     DEFAULT_RATE_COOL,
     DEFAULT_RATE_HEAT,
     DEFAULT_TARGET_C,
     DEFAULT_TOLERANCE_C,
+    VAL_EXTREME_COOL,
+    VAL_EXTREME_HEAT,
     VAL_MAX_LEAD,
     VAL_OVERSHOOT,
     VAL_RATE_COOL,
@@ -99,6 +103,26 @@ _NUMBERS = [
         step=0.1,
         default=DEFAULT_OVERSHOOT_C,
         icon="mdi:thermometer-plus",
+        unit=UnitOfTemperature.CELSIUS,
+    ),
+    ClimateFlowNumberDef(
+        value_key=VAL_EXTREME_COOL,
+        name="Setpoint extrem răcire",
+        minimum=10,
+        maximum=20,
+        step=0.5,
+        default=DEFAULT_EXTREME_COOL_C,
+        icon="mdi:snowflake-thermometer",
+        unit=UnitOfTemperature.CELSIUS,
+    ),
+    ClimateFlowNumberDef(
+        value_key=VAL_EXTREME_HEAT,
+        name="Setpoint extrem încălzire",
+        minimum=25,
+        maximum=32,
+        step=0.5,
+        default=DEFAULT_EXTREME_HEAT_C,
+        icon="mdi:fire",
         unit=UnitOfTemperature.CELSIUS,
     ),
 ]

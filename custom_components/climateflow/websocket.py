@@ -24,6 +24,8 @@ from .const import (
     CONF_OUTDOOR_SENSOR,
     DOMAIN,
     VAL_ENABLED,
+    VAL_EXTREME_COOL,
+    VAL_EXTREME_HEAT,
     VAL_FAN_CAP,
     VAL_GUARD,
     VAL_MAX_LEAD,
@@ -99,6 +101,8 @@ def _controls(hass: HomeAssistant, entry: ConfigEntry) -> dict:
         "rate_heat": eid("number", VAL_RATE_HEAT),
         "rate_cool": eid("number", VAL_RATE_COOL),
         "overshoot": eid("number", VAL_OVERSHOOT),
+        "extreme_cool": eid("number", VAL_EXTREME_COOL),
+        "extreme_heat": eid("number", VAL_EXTREME_HEAT),
     }
 
 

@@ -32,6 +32,8 @@ from .const import (
     CONF_ONE_OFFS,
     CONF_OUTDOOR_SENSOR,
     CONF_TARGET,
+    DEFAULT_EXTREME_COOL_C,
+    DEFAULT_EXTREME_HEAT_C,
     DEFAULT_FAN_CAP,
     DEFAULT_MAX_LEAD_MIN,
     DEFAULT_OVERSHOOT_C,
@@ -51,6 +53,8 @@ from .const import (
     STATE_IDLE,
     STATE_PRECONDITIONING,
     VAL_ENABLED,
+    VAL_EXTREME_COOL,
+    VAL_EXTREME_HEAT,
     VAL_FAN_CAP,
     VAL_GUARD,
     VAL_MAX_LEAD,
@@ -90,10 +94,6 @@ FAN_LADDERS: dict[str, list[str]] = {
     "high": ["high", "max", "strong", "turbo", "powerful", "5", "4", "auto"],
     "auto": ["auto"],
 }
-
-# Fallback-uri pentru setpoint-ul extrem când unitatea nu-și publică min/max_temp.
-EXTREME_COOL_FALLBACK = 16.0
-EXTREME_HEAT_FALLBACK = 30.0
 
 
 def map_fan_mode(cap: str, available: list[str] | None) -> str | None:
@@ -156,6 +156,10 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
         # Contor cumulativ (listele de mai sus sunt trunchiate la 200) —
         # senzorul „Eșantioane învățate” e TOTAL_INCREASING și nu are voie să scadă.
         self._total_samples: int = self._cache.get("total_samples", 0)
+
+        # După un reload/update în mijlocul unei ferestre gestionate, actuatoarele au
+        # rămas pe comenzile VECHI — primul tick retrimite comenzile cu setările noi.
+        self._recommand: bool = self.state_name in (STATE_PRECONDITIONING, STATE_EVENT)
 
         self.policy = guard.GuardPolicy()
         self._pending_reasserts: dict[str, CALLBACK_TYPE] = {}
@@ -454,6 +458,9 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
     async def _during_precondition(self, now: dt.datetime, occ: dict) -> None:
         active = self._active
         plan = active["plan"]
+        if self._recommand:
+            self._recommand = False
+            await self._command_mode(plan["mode"], self._precond_target(plan), fan_cap="high")
         # Escaladare unică la boost dacă ETA proiectat depășește startul evenimentului.
         if (
             plan["season"] == SEASON_WINTER
@@ -524,6 +531,10 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
     async def _during_event(self, now: dt.datetime, occ: dict) -> None:
         active = self._active
         plan = active["plan"]
+        if self._recommand:
+            self._recommand = False
+            cap = "high" if active.get("manual") else self.get_str(VAL_FAN_CAP, DEFAULT_FAN_CAP)
+            await self._command_mode(plan["mode"], plan["target"], fan_cap=cap)
         indoor = self.indoor_temp
         tolerance = self.get_float(VAL_TOLERANCE, DEFAULT_TOLERANCE_C)
 
@@ -837,24 +848,31 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
         return self.get_bool(VAL_ROOM_CONTROL, True)
 
     def _extreme_setpoint(self, entity_id: str, hvac_mode: str) -> float:
-        """Setpoint-ul extrem al unității (min la răcire / max la încălzire).
+        """Setpoint-ul extrem comandat AC-urilor (configurabil; implicit 12°/30°).
 
         Termostatul intern al AC-ului măsoară doar aerul din jurul unității — la
         setpoint normal se „satură" de la propriul aer rece și taie compresorul deși
         sala e încă departe de țintă. Cu setpoint extrem nu se oprește singur
         niciodată; sala e ținută de `_room_thermostat` pe senzorul real.
+
+        Valoarea vine din reglajele utilizatorului (el își cunoaște aparatele);
+        atributele min/max_temp ale unității sunt folosite DOAR ca limită de siguranță
+        (multe integrări nu le publică sau le publică greșit — nu ne bazăm pe ele).
         """
         state = self.hass.states.get(entity_id)
         attrs = state.attributes if state is not None else {}
         if hvac_mode == "cool":
-            return _num(attrs.get("min_temp"), EXTREME_COOL_FALLBACK)
-        return _num(attrs.get("max_temp"), EXTREME_HEAT_FALLBACK)
+            configured = self.get_float(VAL_EXTREME_COOL, DEFAULT_EXTREME_COOL_C)
+            return max(configured, _num(attrs.get("min_temp"), configured))
+        configured = self.get_float(VAL_EXTREME_HEAT, DEFAULT_EXTREME_HEAT_C)
+        return min(configured, _num(attrs.get("max_temp"), configured))
 
     async def _command_mode(self, mode: str, temperature: float, fan_cap: str) -> None:
         """Comandă toate actuatoarele modului: hvac_mode → temperatură → ventilator.
 
         Cu „termostat pe senzorul de sală" activ, AC-urile primesc setpoint extrem
         (centrala rămâne pe țintă — ea are termostat de cameră adevărat)."""
+        self._recommand = False  # orice comandă completă anulează re-comandarea de după reload
         hvac_mode = "cool" if mode == MODE_COOL else "heat"
         for entity_id in self._actuators_for(mode):
             temp = temperature
@@ -1091,6 +1109,9 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
         run = None
         if active is not None and self.state_name in (STATE_PRECONDITIONING, STATE_EVENT):
             precond = active.get("precond_start")
+            ac_cmd = next(
+                (self._commanded[e] for e in self.ac_units if e in self._commanded), None
+            )
             run = {
                 "name": active.get("name"),
                 "target": active["plan"]["target"],
@@ -1102,6 +1123,8 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
                 "escalated": active.get("escalated", False),
                 "event_boost": active.get("event_boost", False),
                 "manual": active.get("manual", False),
+                "acs_on": active.get("acs_on", True),
+                "ac_setpoint": ac_cmd.get("temperature") if ac_cmd else None,
             }
 
         return {

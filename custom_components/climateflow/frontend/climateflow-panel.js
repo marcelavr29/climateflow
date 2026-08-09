@@ -282,6 +282,10 @@ class ClimateFlowPanel extends HTMLElement {
               <div class="hero-eta">țintă la start: <b>${fmt(target, "°", 1)}</b> · mod: ${esc(modeLabel)}</div>` : ""}
             ${l.state === "event" ? `
               <div class="hero-eta">mențin <b>${fmt(target, "°", 1)}</b> · ventilator plafonat</div>` : ""}
+            ${run ? `
+              <div class="hero-eta">AC-uri: ${run.acs_on
+                ? `<b>pornite</b>${run.ac_setpoint != null ? ` · setpoint ${fmt(run.ac_setpoint, "°", 1)}` : ""}`
+                : `<b>oprite</b> <span class="muted">(sala e la țintă — repornesc la nevoie)</span>`}</div>` : ""}
             ${progress != null ? `
               <div class="progress"><div class="progress-fill" style="width:${Math.round(progress * 100)}%"></div></div>
               <div class="muted small">${Math.round(progress * 100)}% din drum (pornit de la ${fmt(run.start_temp, "°", 1)})</div>` : ""}
@@ -619,7 +623,11 @@ class ClimateFlowPanel extends HTMLElement {
         ${numField("overshoot", "Supra-țintă precondiționare", 0, 2, 0.1, 0.5, "°C")}
         ${numField("rate_heat", "Rată implicită încălzire", 0.2, 10, 0.1, 1.5, "°C/h")}
         ${numField("rate_cool", "Rată implicită răcire", 0.2, 10, 0.1, 2.0, "°C/h")}
+        ${numField("extreme_cool", "Setpoint extrem răcire", 10, 20, 0.5, 12, "°C")}
+        ${numField("extreme_heat", "Setpoint extrem încălzire", 25, 32, 0.5, 30, "°C")}
       </div>
+      <p class="muted small">Setpoint-urile extreme sunt cele comandate AC-urilor când „Termostat pe
+      senzorul de sală” e activ — pune valoarea minimă/maximă pe care o acceptă aparatele tale.</p>
 
       <h3>Senzori și aparate</h3>
       <label class="lbl">Senzor temperatură interior</label>

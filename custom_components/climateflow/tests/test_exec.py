@@ -25,6 +25,8 @@ from custom_components.climateflow.const import (  # noqa: E402
     STATE_IDLE,
     STATE_PRECONDITIONING,
     VAL_ENABLED,
+    VAL_EXTREME_COOL,
+    VAL_EXTREME_HEAT,
     VAL_FAN_CAP,
     VAL_GUARD,
     VAL_MAX_LEAD,
@@ -141,6 +143,8 @@ def make_coordinator(hass, *, season=SEASON_WINTER, indoor=19.0, outdoor=5.0,
         VAL_RATE_HEAT: 1.5,
         VAL_RATE_COOL: 2.0,
         VAL_OVERSHOOT: 0.5,
+        VAL_EXTREME_COOL: 12.0,
+        VAL_EXTREME_HEAT: 30.0,
     }
     c.state_name = STATE_IDLE
     c._active = None
@@ -290,6 +294,52 @@ def test_room_control_extreme_setpoint_and_hysteresis():
         await tick(c, _at(18, 10))
         assert c._active["acs_on"] is False
         assert c._commanded["climate.ac2"] == {"hvac_mode": "off"}
+
+    asyncio.run(main())
+
+
+def test_extreme_setpoint_configured_not_unit_attrs():
+    async def main():
+        hass = FakeHass()
+        c = make_coordinator(hass, season=SEASON_SUMMER, indoor=27.0, outdoor=32.0)
+        c.values[VAL_ROOM_CONTROL] = True
+        # Unitate care NU publică min_temp/max_temp → valoarea configurată (12°).
+        hass.states.set("climate.ac1", "off", {"fan_modes": ["low"]})
+        hass.states._data["climate.ac1"].attributes.pop("min_temp", None)
+        assert c._extreme_setpoint("climate.ac1", "cool") == 12.0
+        # Unitate cu minim mai SUS decât configuratul → limitat la minimul unității
+        # (o comandă sub minim ar fi respinsă de integrare).
+        hass.states.set("climate.ac2", "off", {"min_temp": 16})
+        assert c._extreme_setpoint("climate.ac2", "cool") == 16.0
+        # Încălzire: limitat la maximul unității.
+        assert c._extreme_setpoint("climate.ac2", "heat") == 30.0
+        hass.states.set("climate.ac2", "off", {"max_temp": 28})
+        assert c._extreme_setpoint("climate.ac2", "heat") == 28.0
+
+    asyncio.run(main())
+
+
+def test_recommand_after_reload_mid_run():
+    async def main():
+        hass = FakeHass()
+        c = make_coordinator(hass, season=SEASON_SUMMER, indoor=27.0, outdoor=32.0)
+        c.values[VAL_ROOM_CONTROL] = True
+        await tick(c, _at(18, 5))
+        assert c.state_name == STATE_EVENT
+
+        # Simulăm un reload/update: comenzile vechi există, dar flag-ul cere retrimitere.
+        hass.services.calls.clear()
+        c._recommand = True
+        await tick(c, _at(18, 6))
+        # Comenzile au fost retrimise cu setările NOI (setpoint extrem 12°).
+        assert hass.services.of("set_hvac_mode")
+        assert hass.services.of("set_temperature")[0][2]["temperature"] == 12.0
+        assert c._recommand is False
+
+        # Fără flag, tick-urile normale NU retrimit comenzi complete.
+        hass.services.calls.clear()
+        await tick(c, _at(18, 7))
+        assert not hass.services.of("set_hvac_mode")
 
     asyncio.run(main())
 
