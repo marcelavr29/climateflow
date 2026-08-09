@@ -1,0 +1,55 @@
+skip_next:
+  name: Sări următorul eveniment
+  description: Comută markerul de „sări” pe următoarea ocurență programată (apăsat din nou, îl anulează).
+
+boost_now:
+  name: Pornește acum
+  description: Pornește precondiționarea imediat (spre următorul eveniment) sau o rulare manuală de 60 de minute dacă nu urmează nimic.
+
+stop:
+  name: Oprește tot
+  description: Oprește toate aerele și centrala și lasă sistemul în repaus până la următorul eveniment.
+
+add_one_off:
+  name: Adaugă eveniment unic
+  description: Adaugă un eveniment o singură dată (nuntă, înmormântare etc.).
+  fields:
+    name:
+      name: Nume
+      description: Numele evenimentului.
+      required: true
+      example: "Nuntă"
+      selector:
+        text:
+    date:
+      name: Data
+      description: Data evenimentului (YYYY-MM-DD).
+      required: true
+      example: "2026-08-22"
+      selector:
+        date:
+    start:
+      name: Ora de început
+      description: Ora de început (HH:MM).
+      required: true
+      example: "16:00"
+      selector:
+        text:
+    end:
+      name: Ora de sfârșit
+      description: Ora de sfârșit (HH:MM).
+      required: true
+      example: "20:00"
+      selector:
+        text:
+    target:
+      name: Țintă temperatură
+      description: Ținta de temperatură (°C); lipsă = ținta implicită.
+      required: false
+      example: 22
+      selector:
+        number:
+          min: 15
+          max: 28
+          step: 0.5
+          unit_of_measurement: "°C"

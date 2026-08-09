@@ -1,0 +1,31 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "ClimateFlow — configurare",
+        "description": "Alege senzorii de temperatură și actuatoarele. Evenimentele se configurează după instalare.",
+        "data": {
+          "indoor_sensor": "Senzor temperatură interior",
+          "outdoor_sensor": "Senzor temperatură exterior",
+          "ac_units": "Aere condiționate (climate)",
+          "boiler": "Centrală termică (climate, opțional)",
+          "notify_service": "Serviciu notificări (opțional, ex. mobile_app_telefon)"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "ClimateFlow — setări generale",
+        "data": {
+          "indoor_sensor": "Senzor temperatură interior",
+          "outdoor_sensor": "Senzor temperatură exterior",
+          "ac_units": "Aere condiționate (climate)",
+          "boiler": "Centrală termică (climate, opțional)",
+          "notify_service": "Serviciu notificări (opțional)"
+        }
+      }
+    }
+  }
+}
