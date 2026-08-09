@@ -32,6 +32,7 @@ from custom_components.climateflow.const import (  # noqa: E402
     VAL_OVERSHOOT,
     VAL_RATE_COOL,
     VAL_RATE_HEAT,
+    VAL_ROOM_CONTROL,
     VAL_SEASON,
     VAL_TARGET,
     VAL_TOLERANCE,
@@ -131,6 +132,7 @@ def make_coordinator(hass, *, season=SEASON_WINTER, indoor=19.0, outdoor=5.0,
         VAL_ENABLED: True,
         VAL_GUARD: True,
         VAL_NOTIFY: False,
+        VAL_ROOM_CONTROL: False,  # off implicit în teste; pornit explicit unde se testează
         VAL_SEASON: season,
         VAL_FAN_CAP: "low",
         VAL_TARGET: 22.0,
@@ -174,8 +176,10 @@ def make_coordinator(hass, *, season=SEASON_WINTER, indoor=19.0, outdoor=5.0,
 
     hass.states.set("sensor.indoor", str(indoor))
     hass.states.set("sensor.outdoor", str(outdoor))
-    hass.states.set("climate.ac1", "off", {"fan_modes": ["low", "medium", "high", "auto"]})
-    hass.states.set("climate.ac2", "off", {"fan_modes": ["quiet", "1", "2", "3"]})
+    hass.states.set("climate.ac1", "off",
+                    {"fan_modes": ["low", "medium", "high", "auto"], "min_temp": 12, "max_temp": 30})
+    hass.states.set("climate.ac2", "off",
+                    {"fan_modes": ["quiet", "1", "2", "3"], "min_temp": 12, "max_temp": 30})
     if boiler:
         hass.states.set(boiler, "off", {})  # centrala nu are fan_modes
     return c
@@ -197,6 +201,9 @@ def test_map_fan_mode_ladders():
     assert map_fan_mode("medium", ["silent", "turbo"]) == "silent"  # fallback: prima
     assert map_fan_mode("auto", ["low", "high"]) is None  # auto inexistent → nu comanda
     assert map_fan_mode("low", None) is None  # fără fan_modes (centrala)
+    # Pe unități cu trepte 1–5, „maxim" e 5 — nu 4 (bug raportat pe teren).
+    assert map_fan_mode("high", ["1", "2", "3", "4", "5"]) == "5"
+    assert map_fan_mode("high", ["1", "2", "3", "4"]) == "4"
 
 
 # ------------------------------------------------------------- precondiționare
@@ -244,6 +251,76 @@ def test_summer_cools_with_acs_only():
         assert all(call[2]["hvac_mode"] == "cool" for call in hass.services.of("set_hvac_mode"))
         # Răcire: supra-țintă în jos (21.5).
         assert hass.services.of("set_temperature")[0][2]["temperature"] == 21.5
+
+    asyncio.run(main())
+
+
+# ----------------------------------------------- termostat pe senzorul de sală
+def test_room_control_extreme_setpoint_and_hysteresis():
+    async def main():
+        hass = FakeHass()
+        c = make_coordinator(hass, season=SEASON_SUMMER, indoor=27.0, outdoor=32.0)
+        c.values[VAL_ROOM_CONTROL] = True
+
+        # Precondiționare: AC-urile primesc minimul unității (12°), NU ținta —
+        # altfel termostatul lor intern se saturează de la propriul aer rece.
+        await tick(c, _at(16, 30))
+        assert c.state_name == STATE_PRECONDITIONING
+        temps = {call[2]["entity_id"]: call[2]["temperature"]
+                 for call in hass.services.of("set_temperature")}
+        assert temps == {"climate.ac1": 12.0, "climate.ac2": 12.0}
+        assert c._active["acs_on"] is True
+
+        # Sala (senzorul real) a coborât sub țintă − toleranță → AC-urile se opresc.
+        hass.states.set("sensor.indoor", "20.5")  # țintă precond 21.5, tol 0.7
+        await tick(c, _at(16, 40))
+        assert hass.services.of("turn_off")
+        assert c._commanded["climate.ac1"] == {"hvac_mode": "off"}
+        assert c._active["acs_on"] is False
+
+        # În eveniment sala urcă peste țintă + toleranță → repornesc, tot pe 12°.
+        hass.states.set("sensor.indoor", "23.0")  # țintă 22, tol 0.7
+        await tick(c, _at(18, 5))
+        assert c.state_name == STATE_EVENT
+        assert c._active["acs_on"] is True
+        assert hass.services.of("set_temperature")[-1][2]["temperature"] == 12.0
+
+        # Se satisface din nou în timpul evenimentului → se opresc iar.
+        hass.states.set("sensor.indoor", "21.2")  # sub 22 − 0.7
+        await tick(c, _at(18, 10))
+        assert c._active["acs_on"] is False
+        assert c._commanded["climate.ac2"] == {"hvac_mode": "off"}
+
+    asyncio.run(main())
+
+
+def test_room_control_off_keeps_target_setpoint():
+    async def main():
+        hass = FakeHass()
+        c = make_coordinator(hass, season=SEASON_SUMMER, indoor=27.0, outdoor=32.0)
+        assert c.values[VAL_ROOM_CONTROL] is False
+        await tick(c, _at(16, 30))
+        # Comportamentul clasic: setpoint = țintă − supra-țintă (21.5).
+        assert hass.services.of("set_temperature")[0][2]["temperature"] == 21.5
+
+    asyncio.run(main())
+
+
+def test_room_control_leaves_boiler_on_target():
+    async def main():
+        hass = FakeHass()
+        c = make_coordinator(hass, indoor=19.0)  # iarnă, boiler-only
+        c.values[VAL_ROOM_CONTROL] = True
+        await tick(c, _at(16, 0))
+        # Centrala are termostat de cameră real → primește ținta normală (22.5).
+        assert hass.services.of("set_temperature")[0][2] == {
+            "entity_id": "climate.boiler", "temperature": 22.5
+        }
+        # Și histerezisul nu o atinge: sala „prea caldă" nu oprește centrala.
+        hass.states.set("sensor.indoor", "23.5")
+        n_off = len(hass.services.of("turn_off"))
+        await tick(c, _at(16, 5))
+        assert len(hass.services.of("turn_off")) == n_off
 
     asyncio.run(main())
 

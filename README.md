@@ -19,6 +19,9 @@ ca la începutul evenimentului temperatura să fie la țintă.
   dacă temperatura scapă, aprinde senzorul „Confort sub țintă” și notifică.
 - **Iarna**: centrala termică e sursa principală; aerele intră automat ca **boost**
   pe încălzire când estimarea arată că ținta nu se prinde la timp.
+- **Termostat pe senzorul de sală**: AC-urile primesc setpoint extrem (minimul/maximul
+  unității) ca termostatul lor intern să nu se „sature" de la propriul aer — sala e
+  ținută la țintă de ClimateFlow, pe senzorul real, cu histerezis (pornit/oprit).
 - **Gardă anti-telecomandă**: în perioadele gestionate re-asertează setările modificate
   de la telecomenzi (cu debounce, limită de re-asertări și pauză anti-luptă).
 - **Master switch** de activ/inactiv + buton/serviciu de oprire de urgență (totul OFF).

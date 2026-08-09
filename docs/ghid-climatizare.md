@@ -88,6 +88,27 @@ situații:
 Fiecare boost apare în istoricul din tab-ul Învățare (⚡), ca să vezi cât de des e
 nevoie de el — dacă e mereu, poate merită crescut „Avansul maxim".
 
+## Termostatul pe senzorul de sală (de ce AC-urile nu primesc ținta)
+
+Termostatul intern al unui aparat de aer condiționat măsoară aerul din **jurul
+unității** (de obicei sus, la aspirație). La setpoint 22°, aerul rece pe care îl suflă
+chiar el ajunge repede înapoi la senzorul lui → aparatul „crede" că încăperea s-a răcit
+și taie compresorul, deși sala e încă caldă. Efectul clasic: zona de lângă aparat e
+rece, restul sălii nu.
+
+De aceea, cu comutatorul **„Termostat pe senzorul de sală"** activ (implicit),
+ClimateFlow comandă aparatelor **setpoint-ul extrem** — minimul unității la răcire,
+maximul la încălzire — ca să nu se auto-oprească niciodată. Sala e ținută la țintă de
+ClimateFlow însuși, pe senzorul real de sală, cu histerezis pe toleranță:
+
+- sala peste țintă + toleranță (la răcire) → aparatele pornesc (setpoint extrem);
+- sala sub țintă − toleranță → aparatele se opresc de tot;
+- garda apără inclusiv starea „oprit" și setpoint-ul extrem (dacă cineva îl mută pe
+  22° de la telecomandă, revine).
+
+Centrala termică **nu** e afectată de acest mod — ea are termostat de cameră adevărat
+și primește în continuare ținta normală.
+
 ## Garda anti-telecomandă
 
 În perioadele gestionate (precondiționare + eveniment), orice abatere de la setările

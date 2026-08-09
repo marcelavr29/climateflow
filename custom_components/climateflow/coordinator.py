@@ -58,6 +58,7 @@ from .const import (
     VAL_OVERSHOOT,
     VAL_RATE_COOL,
     VAL_RATE_HEAT,
+    VAL_ROOM_CONTROL,
     VAL_SEASON,
     VAL_TARGET,
     VAL_TOLERANCE,
@@ -85,9 +86,14 @@ FAN_LADDERS: dict[str, list[str]] = {
     "quiet": ["quiet", "silent", "silence", "night", "low", "min", "1", "auto"],
     "low": ["low", "min", "quiet", "silent", "1", "2", "auto"],
     "medium": ["medium", "mid", "middle", "med", "2", "3", "auto"],
-    "high": ["high", "max", "strong", "turbo", "powerful", "4", "5", "auto"],
+    # Treptele numerice în ordine DESCRESCĂTOARE — pe unități 1–5, „maxim" e 5, nu 4.
+    "high": ["high", "max", "strong", "turbo", "powerful", "5", "4", "auto"],
     "auto": ["auto"],
 }
+
+# Fallback-uri pentru setpoint-ul extrem când unitatea nu-și publică min/max_temp.
+EXTREME_COOL_FALLBACK = 16.0
+EXTREME_HEAT_FALLBACK = 30.0
 
 
 def map_fan_mode(cap: str, available: list[str] | None) -> str | None:
@@ -475,6 +481,7 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
                             "Centrala singură nu prinde ținta la timp — am pornit și aerele pe încălzire.",
                             kind="boost",
                         )
+        await self._room_thermostat(self._precond_target(plan), "high")
         await self._reconcile(now)
 
     async def _enter_event(self, now: dt.datetime, occ: dict) -> None:
@@ -555,6 +562,8 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
         else:
             self._deficit_since = None
 
+        fan_cap = "high" if active.get("manual") else self.get_str(VAL_FAN_CAP, DEFAULT_FAN_CAP)
+        await self._room_thermostat(plan["target"], fan_cap)
         await self._reconcile(now)
 
     @callback
@@ -824,11 +833,76 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
             _LOGGER.error("climate.%s a eșuat pentru %s: %s", service, data, err)
             return False
 
+    def _room_control_on(self) -> bool:
+        return self.get_bool(VAL_ROOM_CONTROL, True)
+
+    def _extreme_setpoint(self, entity_id: str, hvac_mode: str) -> float:
+        """Setpoint-ul extrem al unității (min la răcire / max la încălzire).
+
+        Termostatul intern al AC-ului măsoară doar aerul din jurul unității — la
+        setpoint normal se „satură" de la propriul aer rece și taie compresorul deși
+        sala e încă departe de țintă. Cu setpoint extrem nu se oprește singur
+        niciodată; sala e ținută de `_room_thermostat` pe senzorul real.
+        """
+        state = self.hass.states.get(entity_id)
+        attrs = state.attributes if state is not None else {}
+        if hvac_mode == "cool":
+            return _num(attrs.get("min_temp"), EXTREME_COOL_FALLBACK)
+        return _num(attrs.get("max_temp"), EXTREME_HEAT_FALLBACK)
+
     async def _command_mode(self, mode: str, temperature: float, fan_cap: str) -> None:
-        """Comandă toate actuatoarele modului: hvac_mode → temperatură → ventilator."""
+        """Comandă toate actuatoarele modului: hvac_mode → temperatură → ventilator.
+
+        Cu „termostat pe senzorul de sală" activ, AC-urile primesc setpoint extrem
+        (centrala rămâne pe țintă — ea are termostat de cameră adevărat)."""
         hvac_mode = "cool" if mode == MODE_COOL else "heat"
         for entity_id in self._actuators_for(mode):
-            await self._command_entity(entity_id, hvac_mode, temperature, fan_cap)
+            temp = temperature
+            if self._room_control_on() and entity_id in self.ac_units:
+                temp = self._extreme_setpoint(entity_id, hvac_mode)
+            await self._command_entity(entity_id, hvac_mode, temp, fan_cap)
+        if self._active is not None:
+            self._active["acs_on"] = True
+
+    async def _turn_off_acs(self) -> None:
+        """Oprește doar AC-urile (histerezis) — starea OFF devine cea apărată de gardă."""
+        for entity_id in self.ac_units:
+            self.policy.note_command(entity_id, dt_util.utcnow().timestamp())
+            if await self._climate_call("turn_off", {"entity_id": entity_id}):
+                self._commanded[entity_id] = {"hvac_mode": "off"}
+            self.policy.note_command(entity_id, dt_util.utcnow().timestamp())
+        if self._active is not None:
+            self._active["acs_on"] = False
+        self._sync_cache()
+
+    async def _room_thermostat(self, phase_target: float, fan_cap: str) -> None:
+        """Histerezis pe senzorul de sală: pornește/oprește AC-urile după nevoia reală."""
+        active = self._active
+        mode = active["plan"]["mode"]
+        if not self._room_control_on() or not self.ac_units:
+            return
+        if not any(e in self.ac_units for e in self._actuators_for(mode)):
+            return  # în modul curent lucrează doar centrala
+        indoor = self.indoor_temp
+        if indoor is None:
+            return
+        tol = self.get_float(VAL_TOLERANCE, DEFAULT_TOLERANCE_C)
+        cooling = mode == MODE_COOL
+        need_more = indoor > phase_target + tol if cooling else indoor < phase_target - tol
+        satisfied = indoor < phase_target - tol if cooling else indoor > phase_target + tol
+        acs_on = active.get("acs_on", True)
+        if satisfied and acs_on:
+            _LOGGER.info("Sala a atins ținta (%.1f°) — opresc AC-urile (histerezis)", indoor)
+            await self._turn_off_acs()
+        elif need_more and not acs_on:
+            _LOGGER.info("Sala a derivat (%.1f°) — repornesc AC-urile", indoor)
+            hvac_mode = "cool" if cooling else "heat"
+            for entity_id in self.ac_units:
+                await self._command_entity(
+                    entity_id, hvac_mode, self._extreme_setpoint(entity_id, hvac_mode), fan_cap
+                )
+            active["acs_on"] = True
+            self._sync_cache()
 
     async def _command_entity(
         self, entity_id: str, hvac_mode: str, temperature: float, fan_cap: str

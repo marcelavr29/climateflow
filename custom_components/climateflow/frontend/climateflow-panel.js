@@ -602,6 +602,7 @@ class ClimateFlowPanel extends HTMLElement {
       <h3>Comportament</h3>
       <label class="chk"><input type="checkbox" data-ctrl="toggle" data-key="enabled" ${on("enabled", true) ? "checked" : ""}/> Sistem activ</label>
       <label class="chk"><input type="checkbox" data-ctrl="toggle" data-key="guard" ${on("guard", true) ? "checked" : ""}/> Gardă anti-modificare (suprascrie telecomenzile în timpul evenimentelor)</label>
+      <label class="chk"><input type="checkbox" data-ctrl="toggle" data-key="room_control" ${on("room_control", true) ? "checked" : ""}/> Termostat pe senzorul de sală (AC-urile primesc setpoint extrem; sala e ținută de ClimateFlow)</label>
       <label class="chk"><input type="checkbox" data-ctrl="toggle" data-key="notify" ${on("notify", true) ? "checked" : ""}/> Notificări</label>
 
       <label class="lbl">Sezon</label>
@@ -664,6 +665,15 @@ class ClimateFlowPanel extends HTMLElement {
       <p>Centrala e sursa principală. Dacă estimarea arată că ținta nu se prinde nici cu
       avansul maxim, aerele pornesc și ele pe încălzire (<b>boost</b>). În timpul evenimentului
       aerele pot intra în ajutor doar cu ventilatorul plafonat.</p>
+      <h3>De ce aparatele arată 16° (sau minimul lor), nu ținta?</h3>
+      <p>Termostatul intern al unui AC măsoară doar aerul din <b>jurul unității</b>. La un
+      setpoint normal (ex. 22°), aerul rece pe care îl suflă chiar el îl păcălește că
+      încăperea s-a răcit și taie compresorul — deși sala e încă departe de țintă. De aceea,
+      cu „Termostat pe senzorul de sală” activ, ClimateFlow dă aparatelor <b>setpoint-ul
+      extrem</b> (minimul la răcire, maximul la încălzire) ca să nu se oprească singure
+      niciodată, iar sala e ținută la țintă de ClimateFlow însuși, pe senzorul real: când
+      senzorul de sală atinge ținta, aparatele se opresc; când temperatura derivă peste
+      toleranță, repornesc. Centrala nu e afectată — ea are termostat de cameră adevărat.</p>
       <h3>Garda anti-telecomandă</h3>
       <p>În timpul precondiționării și al evenimentului, orice modificare făcută din
       telecomandă (temperatură, mod, viteză) este <b>suprascrisă</b> în ~20 de secunde. Dacă

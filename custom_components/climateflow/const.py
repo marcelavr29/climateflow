@@ -64,6 +64,7 @@ DEFAULT_EVENTS: list[dict] = [
 # --- Chei valori reglabile live (coordinator.values) --------------------------
 VAL_ENABLED = "enabled"  # master: sistemul comandă / nu comandă nimic
 VAL_GUARD = "guard"  # garda anti-modificare (telecomenzi)
+VAL_ROOM_CONTROL = "room_control"  # termostat pe senzorul de sală (setpoint extrem pe AC-uri)
 VAL_NOTIFY = "notify"  # notificări HA
 VAL_SEASON = "season"  # vară / iarnă / auto
 VAL_FAN_CAP = "fan_cap"  # treapta maximă de ventilator în timpul evenimentului
