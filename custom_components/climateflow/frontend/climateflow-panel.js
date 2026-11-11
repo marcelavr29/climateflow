@@ -540,7 +540,7 @@ class ClimateFlowPanel extends HTMLElement {
         .map((r) => {
           const d = r.ts ? new Date(r.ts).toLocaleString("ro-RO", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
           if (r.type === "boost")
-            return `<tr><td>${esc(d)}</td><td colspan="4">⚡ boost activat — ${esc(r.name || "")} <span class="muted">(${r.phase === "event" ? "în timpul evenimentului" : "în precondiționare"})</span></td></tr>`;
+            return `<tr><td>${esc(d)}</td><td colspan="4">⚡ boost activat — ${esc(r.name || "")} <span class="muted">(${r.phase === "event" ? "în timpul evenimentului" : r.phase === "start" ? "din start — avansul maxim nu ajunge centralei" : "în precondiționare"})</span></td></tr>`;
           const ok = r.on_time == null ? "—" : r.on_time ? `<span class="ok">✓ la timp</span>` : `<span class="late">✗ întârziat</span>`;
           return `<tr><td>${esc(d)}</td><td>${esc(r.name || "")}</td><td class="r">${fmt(r.minutes, " min", 0)}</td><td class="r">${r.rate != null ? fmt(r.rate, " °C/h", 2) : "—"}</td><td>${ok}</td></tr>`;
         })
@@ -551,7 +551,15 @@ class ClimateFlowPanel extends HTMLElement {
     }
 
     const stats = (h && h.stats) || {};
+    const sug = h && h.suggestion;
+    const sugHtml = sug
+      ? `<div class="card" style="border-left:4px solid #ffb300">💡 Boost-ul a pornit din start de
+           ${sug.count} ori în ultimele 30 de zile: centrala singură ar avea nevoie de
+           ~<b>${fmt(sug.needed_min, " min", 0)}</b>, iar „Avans maxim” e <b>${fmt(sug.max_lead, " min", 0)}</b>.
+           Crește „Avans maxim” (Setări) dacă vrei să pornească mai devreme în loc de boost.</div>`
+      : "";
     return `
+      ${sugHtml}
       <div class="cards">
         <div class="card kv"><span>Eșantioane învățate</span><b>${l.sample_count != null ? l.sample_count : "—"}</b></div>
         <div class="card kv"><span>Punctualitate (30 zile)</span><b>${l.on_time_pct != null ? l.on_time_pct + "%" : "—"}</b></div>
@@ -607,11 +615,12 @@ class ClimateFlowPanel extends HTMLElement {
       <label class="chk"><input type="checkbox" data-ctrl="toggle" data-key="enabled" ${on("enabled", true) ? "checked" : ""}/> Sistem activ</label>
       <label class="chk"><input type="checkbox" data-ctrl="toggle" data-key="guard" ${on("guard", true) ? "checked" : ""}/> Gardă anti-modificare (suprascrie telecomenzile în timpul evenimentelor)</label>
       <label class="chk"><input type="checkbox" data-ctrl="toggle" data-key="room_control" ${on("room_control", true) ? "checked" : ""}/> Termostat pe senzorul de sală (AC-urile primesc setpoint extrem; sala e ținută de ClimateFlow)</label>
+      <label class="chk"><input type="checkbox" data-ctrl="toggle" data-key="boiler_setback_on" ${on("boiler_setback_on", true) ? "checked" : ""}/> Centrala rămâne pe temperatura de așteptare după eveniment (în loc să se oprească)</label>
       <label class="chk"><input type="checkbox" data-ctrl="toggle" data-key="notify" ${on("notify", true) ? "checked" : ""}/> Notificări</label>
 
       <label class="lbl">Sezon</label>
       <div class="seg-row">${seasonSeg}</div>
-      <p class="muted small">Pe „Auto”: sub 15° afară → iarnă, peste 22° → vară (decis la pornirea precondiționării).</p>
+      <p class="muted small">Pe „Auto”: sub 15° afară → iarnă, peste 22° → vară; între ele decide nevoia sălii (sub țintă → încălzire).</p>
 
       <label class="lbl">Ventilator maxim în timpul evenimentului</label>
       <div class="seg-row">${fanSeg}</div>
@@ -625,6 +634,7 @@ class ClimateFlowPanel extends HTMLElement {
         ${numField("rate_cool", "Rată implicită răcire", 0.2, 10, 0.1, 2.0, "°C/h")}
         ${numField("extreme_cool", "Setpoint extrem răcire", 10, 20, 0.5, 12, "°C")}
         ${numField("extreme_heat", "Setpoint extrem încălzire", 25, 32, 0.5, 30, "°C")}
+        ${numField("boiler_setback", "Temperatură de așteptare centrală", 5, 22, 0.5, 18, "°C")}
       </div>
       <p class="muted small">Setpoint-urile extreme sunt cele comandate AC-urilor când „Termostat pe
       senzorul de sală” e activ — pune valoarea minimă/maximă pe care o acceptă aparatele tale.</p>
@@ -657,7 +667,7 @@ class ClimateFlowPanel extends HTMLElement {
       <p>ClimateFlow pornește singur climatizarea <b>înainte</b> de fiecare eveniment, astfel
       încât la ora de început sala să fie deja la temperatura țintă. În timpul evenimentului
       menține ținta cu ventilatoarele <b>plafonate</b> (fără zgomot), iar la final
-      <b>stinge tot</b> și nu se mai atinge de nimic.</p>
+      <b>stinge aerele</b>, trece centrala pe temperatura de așteptare și nu se mai atinge de nimic.</p>
       <h3>Avansul de pornire (învățare)</h3>
       <p>Avans = grade de recuperat ÷ rata învățată (°C/h) × 1.15 marjă, plafonat la „Avans
       maxim”. Rata se învață din fiecare precondiționare, pe <b>benzi de temperatură
@@ -689,7 +699,8 @@ class ClimateFlowPanel extends HTMLElement {
       O poți opri din Setări → „Gardă anti-modificare”.</p>
       <h3>Butoanele</h3>
       <ul class="help">
-        <li><b>⏹ Oprește tot</b> — stinge imediat aerele și centrala; sistemul așteaptă
+        <li><b>⏹ Oprește tot</b> — stinge imediat aerele (centrala trece pe temperatura de
+        așteptare, dacă e activată; altfel se stinge); evenimentul curent rămâne oprit, iar sistemul așteaptă
         următorul eveniment. Funcționează de pe orice cont, nu cere admin.</li>
         <li><b>⏭ Sari următorul</b> — următorul eveniment nu pornește climatizarea (apăsat
         din nou, anulează). Poți sări orice ocurență din agendă, nu doar următoarea.</li>
@@ -823,6 +834,8 @@ class ClimateFlowPanel extends HTMLElement {
       if (act === "sheet-save") {
         const vals = this._sheetRead();
         if (!vals.days.length) return this._toast("Alege cel puțin o zi.", true);
+        if (vals.end <= vals.start)
+          return this._toast("Ora de sfârșit trebuie să fie după cea de început.", true);
         if (this._sheet.eventId != null)
           this._events[this._sheet.eventId] = { ...this._events[this._sheet.eventId], ...vals };
         else this._events.push({ id: genId(), ...vals });
@@ -840,6 +853,8 @@ class ClimateFlowPanel extends HTMLElement {
         const $ = (id) => this.shadowRoot.getElementById(id);
         if (!$("oo-date").value) return this._toast("Alege data.", true);
         const targetRaw = $("oo-target").value;
+        if (($("oo-end").value || "20:00") <= ($("oo-start").value || "16:00"))
+          return this._toast("Ora de sfârșit trebuie să fie după cea de început.", true);
         this._oneOffs.push({
           id: genId(),
           name: $("oo-name").value || "Eveniment unic",

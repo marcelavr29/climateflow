@@ -14,6 +14,7 @@ from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 
+from . import schedule
 from .const import (
     CONF_AC_UNITS,
     CONF_BOILER,
@@ -23,6 +24,8 @@ from .const import (
     CONF_ONE_OFFS,
     CONF_OUTDOOR_SENSOR,
     DOMAIN,
+    VAL_BOILER_SETBACK,
+    VAL_BOILER_SETBACK_ON,
     VAL_ENABLED,
     VAL_EXTREME_COOL,
     VAL_EXTREME_HEAT,
@@ -103,6 +106,8 @@ def _controls(hass: HomeAssistant, entry: ConfigEntry) -> dict:
         "overshoot": eid("number", VAL_OVERSHOOT),
         "extreme_cool": eid("number", VAL_EXTREME_COOL),
         "extreme_heat": eid("number", VAL_EXTREME_HEAT),
+        "boiler_setback_on": eid("switch", VAL_BOILER_SETBACK_ON),
+        "boiler_setback": eid("number", VAL_BOILER_SETBACK),
     }
 
 
@@ -156,6 +161,22 @@ async def ws_save_events(
     if entry is None:
         connection.send_error(msg["id"], "not_found", "ClimateFlow nu e configurat")
         return
+    # Un eveniment cu ore invalide ar fi ignorat în tăcere de program — refuzăm la salvare.
+    for item, is_one_off in [
+        *((e, False) for e in msg["events"]),
+        *((o, True) for o in msg.get("one_offs", [])),
+    ]:
+        error = (
+            schedule.window_error(
+                item.get("start"), item.get("end"), item.get("date") if is_one_off else None
+            )
+            if isinstance(item, dict)
+            else "format invalid"
+        )
+        if error:
+            name = item.get("name", "?") if isinstance(item, dict) else "?"
+            connection.send_error(msg["id"], "invalid_format", f"„{name}”: {error}")
+            return
     options = {**entry.options, CONF_EVENTS: msg["events"]}
     if "one_offs" in msg:
         options[CONF_ONE_OFFS] = msg["one_offs"]

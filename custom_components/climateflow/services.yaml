@@ -8,7 +8,7 @@ boost_now:
 
 stop:
   name: Oprește tot
-  description: Oprește toate aerele și centrala și lasă sistemul în repaus până la următorul eveniment.
+  description: Oprește aerele (centrala trece pe temperatura de așteptare, dacă e activată; altfel se oprește) și lasă sistemul în repaus până la următorul eveniment.
 
 add_one_off:
   name: Adaugă eveniment unic

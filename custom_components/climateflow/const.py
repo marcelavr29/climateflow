@@ -76,9 +76,12 @@ VAL_RATE_COOL = "default_rate_cool"  # rată implicită răcire (°C/h)
 VAL_OVERSHOOT = "overshoot"  # supra-țintă la precondiționare (°C)
 VAL_EXTREME_COOL = "extreme_cool"  # setpoint extrem răcire (termostat pe sală)
 VAL_EXTREME_HEAT = "extreme_heat"  # setpoint extrem încălzire
+VAL_BOILER_SETBACK_ON = "boiler_setback_on"  # centrala rămâne pe temperatura de așteptare
+VAL_BOILER_SETBACK = "boiler_setback"  # temperatura de așteptare a centralei (°C)
 
 DEFAULT_EXTREME_COOL_C = 12.0
 DEFAULT_EXTREME_HEAT_C = 30.0
+DEFAULT_BOILER_SETBACK_C = 18.0
 DEFAULT_TARGET_C = 22.0
 DEFAULT_MAX_LEAD_MIN = 180.0
 DEFAULT_TOLERANCE_C = 0.7

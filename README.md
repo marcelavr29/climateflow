@@ -22,10 +22,12 @@ ca la începutul evenimentului temperatura să fie la țintă.
 - **Termostat pe senzorul de sală**: AC-urile primesc setpoint extrem (minimul/maximul
   unității) ca termostatul lor intern să nu se „sature" de la propriul aer — sala e
   ținută la țintă de ClimateFlow, pe senzorul real, cu histerezis (pornit/oprit).
+  Dacă senzorul de sală pică, aparatele revin automat pe ținta normală.
 - **Gardă anti-telecomandă**: în perioadele gestionate re-asertează setările modificate
   de la telecomenzi (cu debounce, limită de re-asertări și pauză anti-luptă).
 - **Master switch** de activ/inactiv + buton/serviciu de oprire de urgență (totul OFF).
-- La finalul evenimentului **stinge tot** și nu se mai atinge de nimic până la următorul.
+- La finalul evenimentului **stinge aerele**, iar centrala coboară pe o **temperatură de
+  așteptare** configurabilă (implicit 18°), apoi nu se mai atinge de nimic până la următorul.
 
 ## Instalare
 
@@ -56,9 +58,10 @@ mutat ore, sărit o ocurență, adăugat evenimente unice (nunți etc.).
 |---|---|
 | `switch` Sistem activ | master — oprit ⇒ nu se comandă nimic |
 | `switch` Gardă anti-modificare | re-asertarea setărilor schimbate de la telecomandă |
-| `select` Sezon | `summer` / `winter` / `auto` (auto: după exteriorul de la momentul pornirii, cu histerezis) |
+| `select` Sezon | `summer` / `winter` / `auto` (auto: după exterior; între 15° și 22° decide nevoia sălii) |
 | `select` Ventilator maxim în eveniment | plafonul de viteză din timpul evenimentului |
 | `number` Țintă temperatură, Avans maxim, Toleranță, Rate implicite, Supra-țintă | reglaje fine |
+| `switch` + `number` Temperatură de așteptare centrală | centrala nu se stinge la final, coboară pe această temperatură |
 | `sensor` Următorul eveniment / Pornire precondiționare | ce urmează și când pornește |
 | `sensor` Stare sistem | `idle` / `preconditioning` / `event` / `cooldown` |
 | `sensor` Rată termică, Eșantioane, Punctualitate | diagnostic — ce a învățat sistemul |
@@ -67,10 +70,11 @@ mutat ore, sărit o ocurență, adăugat evenimente unice (nunți etc.).
 
 ## Cum calculează avansul
 
-`avans = Δ°C necesar ÷ rata învățată (°C/h) × 1.15`, plafonat la „Avans maxim”.
+`avans = inerția învățată + Δ°C necesar ÷ rata învățată (°C/h) × 1.15`, plafonat la „Avans maxim”.
 Rata e o medie mobilă pe benzi de temperatură exterioară, per mod
 (`cool` / `heat_boiler` / `heat_boiler_boost`), învățată din fiecare precondiționare
-reușită. Până se adună eșantioane, se folosesc ratele implicite (numbers).
+(măsurată până la atingerea țintei; la o escaladare la boost se învață și rata reală a
+centralei singure, ca data viitoare să pornească mai devreme). Până se adună eșantioane, se folosesc ratele implicite (numbers).
 
 ## Documentație
 

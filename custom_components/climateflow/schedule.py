@@ -47,6 +47,26 @@ def _parse_hm(value: str) -> dt.time | None:
         return None
 
 
+def window_error(start: object, end: object, date: object = None) -> str | None:
+    """Validează o fereastră de eveniment; întoarce mesajul de eroare sau None.
+
+    Folosit la SALVARE (panou / serviciu) — un eveniment invalid ar fi altfel
+    ignorat în tăcere de `_occurrence` și n-ar porni niciodată climatizarea.
+    """
+    start_t = _parse_hm(start) if isinstance(start, str) else None
+    end_t = _parse_hm(end) if isinstance(end, str) else None
+    if start_t is None or end_t is None:
+        return "orele trebuie să fie în format HH:MM"
+    if end_t <= start_t:
+        return "ora de sfârșit trebuie să fie după cea de început (în aceeași zi)"
+    if date is not None:
+        try:
+            dt.date.fromisoformat(date)
+        except (TypeError, ValueError):
+            return "data trebuie să fie în format YYYY-MM-DD"
+    return None
+
+
 def occurrence_key(event_id: str, d: dt.date) -> str:
     """Cheia unei ocurențe — folosită de markerii de skip (`skip_next`)."""
     return f"{event_id}:{d.isoformat()}"

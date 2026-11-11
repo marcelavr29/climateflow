@@ -93,9 +93,13 @@ class ClimateFlowOptionsFlow(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         if user_input is not None:
-            self.hass.config_entries.async_update_entry(
-                self.config_entry, data={**self.config_entry.data, **user_input}
-            )
+            data = {**self.config_entry.data, **user_input}
+            # Un câmp opțional golit lipsește din `user_input` — fără asta, centrala /
+            # serviciul de notificare n-ar putea fi șterse niciodată de aici.
+            for key in (CONF_BOILER, CONF_NOTIFY_SERVICE):
+                if key not in user_input:
+                    data[key] = None
+            self.hass.config_entries.async_update_entry(self.config_entry, data=data)
             return self.async_create_entry(title="", data=self.config_entry.options)
         return self.async_show_form(
             step_id="init", data_schema=_general_schema(dict(self.config_entry.data))

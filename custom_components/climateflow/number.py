@@ -11,6 +11,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import ClimateFlowConfigEntry
 from .const import (
+    DEFAULT_BOILER_SETBACK_C,
     DEFAULT_EXTREME_COOL_C,
     DEFAULT_EXTREME_HEAT_C,
     DEFAULT_MAX_LEAD_MIN,
@@ -19,6 +20,7 @@ from .const import (
     DEFAULT_RATE_HEAT,
     DEFAULT_TARGET_C,
     DEFAULT_TOLERANCE_C,
+    VAL_BOILER_SETBACK,
     VAL_EXTREME_COOL,
     VAL_EXTREME_HEAT,
     VAL_MAX_LEAD,
@@ -123,6 +125,16 @@ _NUMBERS = [
         step=0.5,
         default=DEFAULT_EXTREME_HEAT_C,
         icon="mdi:fire",
+        unit=UnitOfTemperature.CELSIUS,
+    ),
+    ClimateFlowNumberDef(
+        value_key=VAL_BOILER_SETBACK,
+        name="Temperatură de așteptare centrală",
+        minimum=5,
+        maximum=22,
+        step=0.5,
+        default=DEFAULT_BOILER_SETBACK_C,
+        icon="mdi:radiator",
         unit=UnitOfTemperature.CELSIUS,
     ),
 ]

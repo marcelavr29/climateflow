@@ -33,6 +33,13 @@ EMA_ALPHA = 0.3
 MIN_SAMPLE_MINUTES = 15.0
 MIN_SAMPLE_DELTA = 0.3
 MAX_SANE_RATE = 10.0  # °C/h — peste asta e glitch de senzor, nu fizică
+# Podeaua ratei învățate dintr-o rulare „prea lentă” (evită 0 → avans infinit).
+MIN_LEARN_RATE = 0.1
+
+# Timpul mort (inerția de pornire): minutele până când sala începe efectiv să urce /
+# coboare. Se învață per mod (EMA) și se adună la avans.
+LAG_DELTA = 0.2  # °C — prima mișcare clară în sensul bun
+MAX_LAG_MIN = 60.0  # peste asta nu mai e inerție, e lipsă de putere (o prinde rata)
 
 DEFAULT_MARGIN = 1.15
 MIN_LEAD_MIN = 10.0
@@ -101,23 +108,48 @@ def effective_rate(rates: dict, mode: str, band: str, default: float) -> float:
     return default
 
 
+def update_lag(lags: dict, mode: str, sample_min: float, alpha: float = EMA_ALPHA) -> dict:
+    """Copie a `lags` cu timpul mort al modului actualizat (EMA; primul eșantion seedează)."""
+    out = dict(lags)
+    sample = min(max(float(sample_min), 0.0), MAX_LAG_MIN)
+    prev = out.get(mode)
+    out[mode] = sample if prev is None else prev + alpha * (sample - prev)
+    return out
+
+
+def needed_minutes(
+    needed_delta: float,
+    rate_c_per_h: float,
+    margin: float = DEFAULT_MARGIN,
+    lag_min: float = 0.0,
+) -> float:
+    """Minutele necesare, NEPLAFONATE: timp mort + Δ/rată × marjă (inf la rată ≤ 0)."""
+    if needed_delta <= 0:
+        return 0.0
+    if rate_c_per_h <= 0:
+        return INF
+    return lag_min + needed_delta / rate_c_per_h * 60.0 * margin
+
+
 def lead_minutes(
     needed_delta: float,
     rate_c_per_h: float,
     max_lead: float,
     margin: float = DEFAULT_MARGIN,
     min_lead: float = MIN_LEAD_MIN,
+    lag_min: float = 0.0,
 ) -> float:
-    """Minutele de avans pentru a acoperi `needed_delta` la rata dată, cu marjă.
+    """Minutele de avans pentru a acoperi `needed_delta` la rata dată, cu marjă,
+    plus timpul mort învățat (`lag_min`).
 
     0 dacă nu e nimic de recuperat; altfel limitat la [min_lead, max_lead].
     """
     if needed_delta <= 0:
         return 0.0
-    if rate_c_per_h <= 0:
+    minutes = needed_minutes(needed_delta, rate_c_per_h, margin, lag_min)
+    if minutes == INF:
         return max_lead
-    minutes = math.ceil(needed_delta / rate_c_per_h * 60.0 * margin)
-    return min(max(float(minutes), min_lead), max_lead)
+    return min(max(float(math.ceil(minutes)), min_lead), max_lead)
 
 
 def required_rate(needed_delta: float, minutes_available: float) -> float:

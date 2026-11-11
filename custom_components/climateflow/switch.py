@@ -11,7 +11,13 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from . import ClimateFlowConfigEntry
-from .const import VAL_ENABLED, VAL_GUARD, VAL_NOTIFY, VAL_ROOM_CONTROL
+from .const import (
+    VAL_BOILER_SETBACK_ON,
+    VAL_ENABLED,
+    VAL_GUARD,
+    VAL_NOTIFY,
+    VAL_ROOM_CONTROL,
+)
 from .coordinator import ClimateFlowCoordinator
 from .entity import ClimateFlowEntity
 
@@ -45,6 +51,14 @@ async def async_setup_entry(
                 name="Termostat pe senzorul de sală",
                 default=True,
                 icon="mdi:home-thermometer",
+                category=EntityCategory.CONFIG,
+            ),
+            ClimateFlowToggle(
+                coordinator,
+                value_key=VAL_BOILER_SETBACK_ON,
+                name="Centrala rămâne pe temperatura de așteptare",
+                default=True,
+                icon="mdi:radiator",
                 category=EntityCategory.CONFIG,
             ),
             ClimateFlowToggle(

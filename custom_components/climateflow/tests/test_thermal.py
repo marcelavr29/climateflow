@@ -135,3 +135,21 @@ def test_required_rate():
     assert required_rate(0.0, 120.0) == 0.0
     assert required_rate(-1.0, 120.0) == 0.0
     assert math.isinf(required_rate(4.0, 0.0))  # fără timp ⇒ imposibil
+
+
+# ------------------------------------------------------- timp mort (inerție)
+def test_lag_is_added_to_lead_and_learned_by_ema():
+    from custom_components.climateflow import thermal
+
+    # 3° la 1.5 °C/h × 1.15 = 138 min; cu 20 min de inerție → 158.
+    assert thermal.lead_minutes(3.0, 1.5, 180.0) == 138.0
+    assert thermal.lead_minutes(3.0, 1.5, 180.0, lag_min=20.0) == 158.0
+    assert thermal.lead_minutes(3.0, 1.5, 150.0, lag_min=20.0) == 150.0  # plafonat
+    assert thermal.lead_minutes(0.0, 1.5, 180.0, lag_min=20.0) == 0.0  # nimic de recuperat
+    assert thermal.needed_minutes(7.0, 1.5) == 322.0  # neplafonat
+
+    lags = thermal.update_lag({}, "heat_boiler", 20.0)
+    assert lags == {"heat_boiler": 20.0}  # primul eșantion seedează
+    lags = thermal.update_lag(lags, "heat_boiler", 30.0)
+    assert round(lags["heat_boiler"], 6) == 23.0  # EMA 30%
+    assert thermal.update_lag({}, "cool", 500.0)["cool"] == thermal.MAX_LAG_MIN

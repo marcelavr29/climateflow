@@ -34,15 +34,21 @@ IDLE ──────────────► PRECONDIȚIONARE ────
   când ventilatoarele se plafonează.
 - **Eveniment**: la ora de start, temperatura comandată devine ținta exactă, iar
   ventilatoarele coboară la plafonul ales (implicit „Redus").
-- **Cooldown**: la ora de final, totul se stinge (cu 3 reîncercări dacă vreo unitate nu
-  răspunde) și sistemul nu se mai atinge de nimic până la următorul eveniment.
+- **Cooldown**: la ora de final se închide ce a pornit ClimateFlow (cu 3 reîncercări
+  dacă vreo unitate nu răspunde): aerele se sting, iar centrala coboară pe
+  **temperatura de așteptare** (vezi mai jos). Apoi sistemul nu se mai atinge de nimic
+  până la următorul eveniment.
 
 ## Cum se calculează avansul
 
 ```
 grade de recuperat = țintă − temperatura interioară (iarna)
-avans (min) = grade ÷ rata (°C/h) × 60 × 1.15, limitat la [10, Avans maxim]
+avans (min) = inerție + grade ÷ rata (°C/h) × 60 × 1.15, limitat la [10, Avans maxim]
 ```
+
+**Inerția** (timpul mort) e intervalul de la pornire până când sala începe efectiv să
+urce — la calorifere, 15–30 de minute în care temperatura nu se mișcă. Se învață
+separat, per mod, și se adună la avans; rata se măsoară abia de la prima mișcare încolo.
 
 **Rata** e partea deșteaptă: ClimateFlow măsoară la fiecare precondiționare câte grade
 pe oră a urcat sala în realitate și reține valoarea pe **benzi de temperatură
@@ -53,8 +59,17 @@ contează 30%, istoricul 70% — se adaptează, dar nu sare la fiecare măsurăt
 Până se strâng eșantioane, se folosesc **ratele implicite** din Setări. Primele
 săptămâni pot fi imprecise — e normal; urmărește tab-ul Învățare cum se umplu benzile.
 
+Rata se măsoară **până în momentul în care sala atinge ținta**, nu pe toată fereastra:
+timpul în care sala doar stă la țintă nu diluează măsurătoarea (altfel sistemul ar
+învăța doar „mai lent", niciodată „mai rapid").
+
+Dacă ținta **nu** a fost atinsă și sala abia s-a mișcat, rularea nu se aruncă: sistemul
+învață „foarte lent" (doar dacă senzorul a raportat în acel interval), ca data viitoare
+să pornească mai devreme.
+
 Eșantioanele suspecte se aruncă automat: rulări sub 15 minute, delte sub 0.3°, rate
-peste 10°C/h (senzor defect), rulări în care s-a umblat la gardă sau senzorii au picat.
+peste 10°C/h (senzor defect), rulări în care s-a umblat la gardă sau la țintă, ori
+senzorii au picat.
 
 ## Regula săptămânii de tranziție
 
@@ -80,13 +95,35 @@ situații:
 
 1. **Din start** — dacă și cu avansul maxim centrala singură n-ar prinde ținta
    (matematic: rata necesară > rata centralei).
-2. **Din mers, în precondiționare** — dacă la jumătatea drumului estimarea arată că
-   ținta nu se atinge la timp (o singură escaladare, nu oscilează).
+2. **Din mers, în precondiționare** — dacă estimarea arată că ținta nu se atinge la
+   timp (o singură escaladare, nu oscilează; nu în primele 15 minute, cât caloriferele
+   abia se încălzesc). După o jumătate de oră de la prima mișcare, estimarea se face
+   după **viteza reală** cu care urcă sala, nu după cea presupusă. În acel moment sistemul **învață rata reală a centralei
+   singure**, deci data viitoare pornește mai devreme și are mai rar nevoie de boost.
+   Porțiunea de boost se învață separat, pe modul „centrală + aere".
 3. **În timpul evenimentului** — dacă temperatura stă sub țintă peste 10 minute; dar
    aici aerele intră **tot cu ventilatorul plafonat** (confortul rămâne prioritar).
 
 Fiecare boost apare în istoricul din tab-ul Învățare (⚡), ca să vezi cât de des e
-nevoie de el — dacă e mereu, poate merită crescut „Avansul maxim".
+nevoie de el. Dacă boost-ul pornește mereu **din start** (situația 1), învățarea nu
+mai are ce face: centrala nu ajunge nici cu avansul maxim. După trei asemenea porniri
+în 30 de zile primești o notificare și o notă în tab-ul Învățare cu avansul de care ar
+avea nevoie centrala singură — crește „Avansul maxim" până acolo.
+
+## Temperatura de așteptare a centralei
+
+La finalul evenimentului centrala **nu se stinge**: trece pe o temperatură de așteptare
+(implicit 18°, reglabilă 5–22° din Setări). O clădire lăsată să se răcească de tot cere
+ore de avans și boost la următorul eveniment; ținută la 18–19°, recuperarea e scurtă și
+previzibilă.
+
+- Se aplică doar dacă centrala a lucrat în acea rulare (iarna). Vara nu e atinsă deloc.
+- Se aplică și la „Oprește tot" și la oprirea „Sistem activ": aerele se sting, centrala
+  coboară pe așteptare.
+- E trimisă o singură dată, la final, și nu e apărată de gardă — o poți schimba manual
+  de pe termostat între evenimente.
+- Comutatorul „Centrala rămâne pe temperatura de așteptare" oprit ⇒ comportamentul
+  vechi: centrala se stinge la final.
 
 ## Termostatul pe senzorul de sală (de ce AC-urile nu primesc ținta)
 
@@ -101,10 +138,16 @@ ClimateFlow comandă aparatelor **setpoint-ul extrem** — minimul unității la
 maximul la încălzire — ca să nu se auto-oprească niciodată. Sala e ținută la țintă de
 ClimateFlow însuși, pe senzorul real de sală, cu histerezis pe toleranță:
 
-- sala peste țintă + toleranță (la răcire) → aparatele pornesc (setpoint extrem);
+- sala peste țintă + jumătate de toleranță (la răcire) → aparatele pornesc (setpoint extrem);
 - sala sub țintă − toleranță → aparatele se opresc de tot;
+- senzorul de sală indisponibil peste 3 minute → aparatele trec pe ținta normală
+  (termostatul lor intern) până revine senzorul, plus notificare;
 - garda apără inclusiv starea „oprit" și setpoint-ul extrem (dacă cineva îl mută pe
-  22° de la telecomandă, revine).
+  22° de la telecomandă, revine);
+- senzorul de sală care n-a mai raportat nimic de 2 ore (baterie moartă, rămas pe
+  ultima valoare) e tratat tot ca indisponibil;
+- dacă aparatul își limitează singur setpoint-ul (comandat 12°, raportează 16°),
+  ClimateFlow adoptă valoarea lui în loc să o corecteze la nesfârșit.
 
 Centrala termică **nu** e afectată de acest mod — ea are termostat de cameră adevărat
 și primește în continuare ținta normală.
@@ -126,8 +169,9 @@ Garda se poate opri complet din Setări (sau switch-ul „Gardă anti-modificare
 - **Vară** — aerele răcesc; centrala nu e atinsă.
 - **Iarnă** — centrala încălzește; aerele intră doar ca boost.
 - **Auto** — decis la fiecare pornire de precondiționare, după temperatura exterioară:
-  sub 15° → iarnă, peste 22° → vară, între ele rămâne pe ce a fost (histerezis — nu
-  comută înainte și înapoi în zilele călduțe de toamnă).
+  sub 15° → iarnă, peste 22° → vară. Între ele decide **nevoia sălii**: sala sub
+  țintă → încălzire, peste țintă → răcire; dacă sala e deja în toleranță, rămâne pe ce
+  a fost. Sezonul rezolvat se păstrează și peste un restart HA.
 
 ## Întrebări frecvente
 
@@ -137,11 +181,30 @@ Nimic — între evenimente ClimateFlow nu se atinge de aparate. Doar în precon
 
 **Dacă restartez Home Assistant în timpul unui eveniment?**
 Se recuperează singur: starea se deduce din ceas + program, nu se pierde nimic în afara
-eșantionului de învățare din rularea respectivă.
+eșantionului de învățare din rularea respectivă. Dacă HA a fost oprit chiar peste
+finalul evenimentului, la pornire stinge aparatele rămase pornite.
+
+**Ce face „Oprește tot"?**
+Stinge aerele (centrala trece pe temperatura de așteptare) și lasă evenimentul curent (sau cel pentru care se precondiționa) oprit —
+nu mai repornește singur. În agendă apare ca „sărit"; îl reactivezi de acolo sau cu
+„Pornește acum". Următorul eveniment pornește normal.
+
+**Ce face „Pornește acum"?**
+Dacă următorul eveniment începe în cel mult „Avansul maxim", pornește precondiționarea
+spre el. Altfel pornește o rulare manuală de 60 de minute (nu încălzește zile întregi
+spre un eveniment îndepărtat).
+
+**Am schimbat ținta / ventilatorul în timpul evenimentului — se aplică?**
+Da, la următorul minut comenzile se retrimit cu valorile noi.
 
 **Cum sar peste un eveniment (ex. nu se ține marți)?**
 Din agenda de pe Acasă → „⏭ sari" pe ocurența respectivă (sau butonul „Sări următorul
 eveniment"). Doar acea apariție e sărită; săptămâna următoare revine normal.
+
+**Dacă modific programul din panou în timpul unui eveniment?**
+Nu se întrerupe nimic: salvarea programului nu mai reîncarcă integrarea. Orele noi sunt
+preluate la următorul minut; comenzile se retrimit doar dacă ai schimbat ținta
+evenimentului în curs.
 
 **Cum adaug o nuntă?**
 Tab-ul Program → „Evenimente unice" → completezi data/ora/ținta → Salvează. Sau
