@@ -66,7 +66,7 @@ mutat ore, sărit o ocurență, adăugat evenimente unice (nunți etc.).
 | `number` Țintă temperatură, Avans maxim, Toleranță, Rate implicite, Supra-țintă | reglaje fine |
 | `switch` + `number` Temperatură de așteptare centrală | centrala nu se stinge la final, coboară pe această temperatură |
 | `switch` Resetare după pornire manuală + `number` Durată maximă pornire manuală | în afara evenimentelor, un aparat pornit de mână și uitat revine pe repaus |
-| `sensor` Următorul eveniment / Pornire precondiționare | ce urmează și când pornește |
+| `sensor` Următorul eveniment / Pornire precondiționare | ce urmează și când pornește; atributul `agenda` al primului listează evenimentele următoarelor 7 zile (`name`, `start`, `end`, `target`, `skipped`), pentru carduri de dashboard |
 | `sensor` Stare sistem | `idle` / `preconditioning` / `event` / `cooldown` |
 | `sensor` Rată termică, Eșantioane, Punctualitate | diagnostic — ce a învățat sistemul |
 | `binary_sensor` Precondiționare / Eveniment în curs / Confort sub țintă | stare live |

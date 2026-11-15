@@ -56,6 +56,7 @@ _DEFS: list[ClimateFlowSensorDef] = [
             "end": d.get("next_event_end"),
             "target": d.get("next_event_target"),
             "skip_armed": d.get("skip_next_armed"),
+            "agenda": d.get("agenda", []),
         },
         device_class=SensorDeviceClass.TIMESTAMP,
         icon="mdi:calendar-clock",
@@ -148,6 +149,9 @@ class ClimateFlowSensor(
     ClimateFlowEntity, CoordinatorEntity[ClimateFlowCoordinator], SensorEntity
 ):
     """Senzor derivat din datele coordinatorului."""
+
+    # Agenda se schimbă zilnic și e mare — nu are ce căuta în istoricul recorder-ului.
+    _unrecorded_attributes = frozenset({"agenda"})
 
     def __init__(
         self, coordinator: ClimateFlowCoordinator, definition: ClimateFlowSensorDef

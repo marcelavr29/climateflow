@@ -581,6 +581,17 @@ def test_agenda_includes_skipped_and_run_block():
         assert key not in c._skips
         assert any(o["key"] == key for o in c._occurrences(now))
 
+        # Agenda compactă din _build_data (atributul senzorului „Următorul eveniment").
+        compact = c._build_data()["agenda"]
+        full = c.agenda()
+        assert set(compact[0]) == {"name", "start", "end", "target", "skipped"}
+        assert [(a["start"], a["skipped"]) for a in compact] == [
+            (a["start"], a["skipped"]) for a in full
+        ]
+        c.toggle_skip(key)
+        assert any(a["skipped"] for a in c._build_data()["agenda"])
+        c.toggle_skip(key)
+
         # Blocul `run` din _build_data: prezent doar în stările gestionate.
         assert c._build_data()["run"] is None
         await tick(c, _at(16, 0))

@@ -1955,6 +1955,18 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
                 and (next_any["key"] in self._skips or next_any["key"] in self._stopped)
             ),
             "skips": sorted(self._skips),
+            # Agenda compactă — atribut pe senzorul „Următorul eveniment", ca un
+            # dashboard obișnuit să poată lista programul fără panoul integrării.
+            "agenda": [
+                {
+                    "name": item["name"],
+                    "start": item["start"],
+                    "end": item["end"],
+                    "target": item["target"],
+                    "skipped": item["skipped"],
+                }
+                for item in self.agenda()
+            ],
             "manual_overrides": [
                 {
                     "entity_id": entity_id,
