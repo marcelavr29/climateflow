@@ -250,6 +250,8 @@ class ClimateFlowPanel extends HTMLElement {
       alerts.push(`<div class="alert warn">🌡️ Temperatura nu se menține la țintă cu ventilatorul plafonat. Plafonul rămâne — confortul are prioritate.</div>`);
     if (l.guard_fighting)
       alerts.push(`<div class="alert warn">🛡️ Cineva modifică repetat un aparat de la telecomandă — garda ia o pauză de 5 minute, apoi reia.</div>`);
+    for (const o of l.manual_overrides || [])
+      alerts.push(`<div class="alert info">✋ <b>${esc(o.name)}</b> e pornit manual în afara unui eveniment — revine pe repaus la <b>${hm(o.resets_at)}</b> dacă nu mai e modificat.</div>`);
     if (l.skip_next_armed)
       alerts.push(`<div class="alert info">⏭ Următorul eveniment va fi <b>sărit</b> — climatizarea nu va porni pentru el.</div>`);
     if (l.transition_week)
@@ -616,6 +618,7 @@ class ClimateFlowPanel extends HTMLElement {
       <label class="chk"><input type="checkbox" data-ctrl="toggle" data-key="guard" ${on("guard", true) ? "checked" : ""}/> Gardă anti-modificare (suprascrie telecomenzile în timpul evenimentelor)</label>
       <label class="chk"><input type="checkbox" data-ctrl="toggle" data-key="room_control" ${on("room_control", true) ? "checked" : ""}/> Termostat pe senzorul de sală (AC-urile primesc setpoint extrem; sala e ținută de ClimateFlow)</label>
       <label class="chk"><input type="checkbox" data-ctrl="toggle" data-key="boiler_setback_on" ${on("boiler_setback_on", true) ? "checked" : ""}/> Centrala rămâne pe temperatura de așteptare după eveniment (în loc să se oprească)</label>
+      <label class="chk"><input type="checkbox" data-ctrl="toggle" data-key="idle_reset_on" ${on("idle_reset_on", true) ? "checked" : ""}/> Resetare după pornire manuală (un aparat pornit de mână în afara evenimentelor revine singur pe repaus)</label>
       <label class="chk"><input type="checkbox" data-ctrl="toggle" data-key="notify" ${on("notify", true) ? "checked" : ""}/> Notificări</label>
 
       <label class="lbl">Sezon</label>
@@ -635,6 +638,7 @@ class ClimateFlowPanel extends HTMLElement {
         ${numField("extreme_cool", "Setpoint extrem răcire", 10, 20, 0.5, 12, "°C")}
         ${numField("extreme_heat", "Setpoint extrem încălzire", 25, 32, 0.5, 30, "°C")}
         ${numField("boiler_setback", "Temperatură de așteptare centrală", 5, 22, 0.5, 18, "°C")}
+        ${numField("idle_reset_min", "Durată maximă pornire manuală", 15, 720, 15, 120, "min")}
       </div>
       <p class="muted small">Setpoint-urile extreme sunt cele comandate AC-urilor când „Termostat pe
       senzorul de sală” e activ — pune valoarea minimă/maximă pe care o acceptă aparatele tale.</p>

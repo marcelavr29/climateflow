@@ -28,6 +28,9 @@ ca la începutul evenimentului temperatura să fie la țintă.
 - **Master switch** de activ/inactiv + buton/serviciu de oprire de urgență (totul OFF).
 - La finalul evenimentului **stinge aerele**, iar centrala coboară pe o **temperatură de
   așteptare** configurabilă (implicit 18°), apoi nu se mai atinge de nimic până la următorul.
+- **Siguranță la porniri manuale uitate**: dacă cineva urcă centrala de pe termostat sau
+  pornește un AC de la telecomandă în afara unui eveniment și uită, aparatul revine singur
+  pe starea de repaus după un timp configurabil (implicit 2 ore de la ultima modificare).
 
 ## Instalare
 
@@ -62,6 +65,7 @@ mutat ore, sărit o ocurență, adăugat evenimente unice (nunți etc.).
 | `select` Ventilator maxim în eveniment | plafonul de viteză din timpul evenimentului |
 | `number` Țintă temperatură, Avans maxim, Toleranță, Rate implicite, Supra-țintă | reglaje fine |
 | `switch` + `number` Temperatură de așteptare centrală | centrala nu se stinge la final, coboară pe această temperatură |
+| `switch` Resetare după pornire manuală + `number` Durată maximă pornire manuală | în afara evenimentelor, un aparat pornit de mână și uitat revine pe repaus |
 | `sensor` Următorul eveniment / Pornire precondiționare | ce urmează și când pornește |
 | `sensor` Stare sistem | `idle` / `preconditioning` / `event` / `cooldown` |
 | `sensor` Rată termică, Eșantioane, Punctualitate | diagnostic — ce a învățat sistemul |

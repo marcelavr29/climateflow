@@ -14,6 +14,7 @@ from .const import (
     DEFAULT_BOILER_SETBACK_C,
     DEFAULT_EXTREME_COOL_C,
     DEFAULT_EXTREME_HEAT_C,
+    DEFAULT_IDLE_RESET_MIN,
     DEFAULT_MAX_LEAD_MIN,
     DEFAULT_OVERSHOOT_C,
     DEFAULT_RATE_COOL,
@@ -23,6 +24,7 @@ from .const import (
     VAL_BOILER_SETBACK,
     VAL_EXTREME_COOL,
     VAL_EXTREME_HEAT,
+    VAL_IDLE_RESET_MIN,
     VAL_MAX_LEAD,
     VAL_OVERSHOOT,
     VAL_RATE_COOL,
@@ -136,6 +138,16 @@ _NUMBERS = [
         default=DEFAULT_BOILER_SETBACK_C,
         icon="mdi:radiator",
         unit=UnitOfTemperature.CELSIUS,
+    ),
+    ClimateFlowNumberDef(
+        value_key=VAL_IDLE_RESET_MIN,
+        name="Durată maximă pornire manuală",
+        minimum=15,
+        maximum=720,
+        step=15,
+        default=DEFAULT_IDLE_RESET_MIN,
+        icon="mdi:timer-off-outline",
+        unit=UnitOfTime.MINUTES,
     ),
 ]
 

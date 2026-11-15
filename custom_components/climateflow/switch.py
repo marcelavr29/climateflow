@@ -15,6 +15,7 @@ from .const import (
     VAL_BOILER_SETBACK_ON,
     VAL_ENABLED,
     VAL_GUARD,
+    VAL_IDLE_RESET_ON,
     VAL_NOTIFY,
     VAL_ROOM_CONTROL,
 )
@@ -59,6 +60,14 @@ async def async_setup_entry(
                 name="Centrala rămâne pe temperatura de așteptare",
                 default=True,
                 icon="mdi:radiator",
+                category=EntityCategory.CONFIG,
+            ),
+            ClimateFlowToggle(
+                coordinator,
+                value_key=VAL_IDLE_RESET_ON,
+                name="Resetare după pornire manuală",
+                default=True,
+                icon="mdi:timer-off-outline",
                 category=EntityCategory.CONFIG,
             ),
             ClimateFlowToggle(

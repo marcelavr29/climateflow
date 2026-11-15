@@ -36,8 +36,9 @@ IDLE ──────────────► PRECONDIȚIONARE ────
   ventilatoarele coboară la plafonul ales (implicit „Redus").
 - **Cooldown**: la ora de final se închide ce a pornit ClimateFlow (cu 3 reîncercări
   dacă vreo unitate nu răspunde): aerele se sting, iar centrala coboară pe
-  **temperatura de așteptare** (vezi mai jos). Apoi sistemul nu se mai atinge de nimic
-  până la următorul eveniment.
+  **temperatura de așteptare** (vezi mai jos). Apoi sistemul nu mai comandă nimic
+  până la următorul eveniment — doar supraveghează pornirile manuale uitate (vezi
+  „Porniri manuale uitate").
 
 ## Cum se calculează avansul
 
@@ -121,9 +122,40 @@ previzibilă.
 - Se aplică și la „Oprește tot" și la oprirea „Sistem activ": aerele se sting, centrala
   coboară pe așteptare.
 - E trimisă o singură dată, la final, și nu e apărată de gardă — o poți schimba manual
-  de pe termostat între evenimente.
+  de pe termostat între evenimente. Dacă o urci și uiți, revine singură pe așteptare
+  (vezi secțiunea următoare).
 - Comutatorul „Centrala rămâne pe temperatura de așteptare" oprit ⇒ comportamentul
   vechi: centrala se stinge la final.
+
+## Porniri manuale uitate (siguranța din afara evenimentelor)
+
+Între evenimente oricine poate urca centrala de pe termostat sau porni un AC de la
+telecomandă (o repetiție, curățenie). Problema apare când uită: aparatul ar merge așa
+până la următorul eveniment programat — uneori zile întregi.
+
+De aceea, în repaus, ClimateFlow urmărește aparatele care **consumă mai mult decât
+starea de repaus**:
+
+- un **AC pornit** (repausul lui e „oprit");
+- **centrala urcată** cu mai mult de 0,5° peste temperatura de așteptare (sau pur și
+  simplu pornită, dacă așteptarea e dezactivată).
+
+Din acel moment curge un cronometru — „Durată maximă pornire manuală", implicit
+**120 de minute**, reglabil 15–720 din Setări. La expirare aparatul e readus pe repaus
+(AC → oprit, centrala → temperatura de așteptare) și primești o notificare. Cât timp
+cronometrul curge, pagina Acasă arată ora la care va reveni.
+
+- **Fiecare modificare nouă repornește cronometrul**: dacă cineva mai urcă un grad după
+  o oră, cele 120 de minute se numără din nou de atunci (omul e prezent).
+- Dacă aparatul e readus de mână pe repaus, cronometrul dispare — nu se trimite nimic.
+- Centrala coborâtă **sub** așteptare sau oprită de mână nu e atinsă (nu risipește nimic).
+- În timpul unei rulări gestionate (precondiționare/eveniment) siguranța nu intervine;
+  dacă la final a rămas ceva pornit de mână, cronometrul pornește de la zero.
+- Cronometrul supraviețuiește restartului Home Assistant.
+- Nu funcționează cu „Sistem activ" oprit (atunci ClimateFlow nu comandă nimic) și se
+  poate dezactiva separat din „Resetare după pornire manuală".
+- Ai nevoie de căldură mai mult timp, fără eveniment în program? Adaugă un eveniment
+  unic din panou — e calea corectă pentru orice utilizare planificată.
 
 ## Termostatul pe senzorul de sală (de ce AC-urile nu primesc ținta)
 

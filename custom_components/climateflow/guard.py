@@ -47,6 +47,33 @@ def deviations(commanded: dict, actual: dict, tolerance: float = TEMP_TOLERANCE_
     return out
 
 
+def is_manual_override(
+    actual: dict,
+    *,
+    is_boiler: bool,
+    rest_temp: float | None,
+    tolerance: float = TEMP_TOLERANCE_C,
+) -> bool | None:
+    """În afara evenimentelor: aparatul consumă mai mult decât starea de repaus?
+
+    Repausul: AC-urile oprite; centrala pe temperatura de așteptare (`rest_temp`) sau
+    oprită (`rest_temp=None`). O centrală coborâtă SUB așteptare ori oprită de mână nu
+    e deviere (nu risipește nimic). None ⇒ starea reală nu e cunoscută — nu se atinge.
+    """
+    mode = actual.get("hvac_mode")
+    if mode in (None, "unavailable", "unknown"):
+        return None
+    if mode == "off":
+        return False
+    if not is_boiler or rest_temp is None:
+        return True
+    try:
+        temp = float(actual.get("temperature"))
+    except (TypeError, ValueError):
+        return None
+    return temp > rest_temp + tolerance
+
+
 class GuardPolicy:
     """Politica anti-luptă per entitate: grace, rate-limit, backoff."""
 

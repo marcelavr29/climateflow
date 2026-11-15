@@ -37,6 +37,7 @@ from .const import (
     DEFAULT_EXTREME_COOL_C,
     DEFAULT_EXTREME_HEAT_C,
     DEFAULT_FAN_CAP,
+    DEFAULT_IDLE_RESET_MIN,
     DEFAULT_MAX_LEAD_MIN,
     DEFAULT_OVERSHOOT_C,
     DEFAULT_RATE_COOL,
@@ -61,6 +62,8 @@ from .const import (
     VAL_EXTREME_HEAT,
     VAL_FAN_CAP,
     VAL_GUARD,
+    VAL_IDLE_RESET_MIN,
+    VAL_IDLE_RESET_ON,
     VAL_MAX_LEAD,
     VAL_NOTIFY,
     VAL_OVERSHOOT,
@@ -87,6 +90,9 @@ DEFICIT_NOTIFY_MIN = 5.0
 DEFICIT_BOOST_MIN = 10.0
 # Durata unei porniri manuale fără eveniment programat.
 MANUAL_RUN_MINUTES = 60.0
+# Resetarea unei porniri manuale uitate a eșuat ⇒ reîncercare după atâtea minute
+# (nu la fiecare tick — ar inunda cu notificări de eroare).
+IDLE_RESET_RETRY_MIN = 10.0
 # Senzorul de sală indisponibil atâtea minute ⇒ AC-urile ies de pe setpoint-ul extrem
 # (fără senzor nu mai există termostat care să le oprească).
 SENSOR_LOST_FALLBACK_MIN = 3.0
@@ -186,6 +192,9 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
         self._force_key: str | None = self._cache.get("force_key")
         self._deficit_since: dt.datetime | None = None
         self._fight_notified = False
+        # Porniri manuale în afara evenimentelor: {entitate: {"since", "sig"}} —
+        # cronometrul siguranței (vezi `_idle_watch`).
+        self._overrides: dict[str, dict] = copy.deepcopy(self._cache.get("overrides", {}))
 
         self._skips: set[str] = set(self._cache.get("skips", []))
         # Ocurențe oprite manual („Oprește tot") — nu mai repornesc până la următoarea.
@@ -248,6 +257,12 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
             known = set(self.all_actuators())
             self._orphan_entities = [e for e in (entities or []) if e in known]
             self._orphan_check = bool(self._orphan_entities)
+            # Cronometrele pornirilor manuale continuă peste restart.
+            for entity_id, item in (data.get("overrides") or {}).items():
+                since = dt_util.parse_datetime(str(item.get("since", "")))
+                if entity_id in known and since is not None:
+                    self._overrides[entity_id] = {"since": since, "sig": item.get("sig")}
+            self._cache["overrides"] = self._overrides
         self._cache["skips"] = list(self._skips)
         self._cache["stopped"] = list(self._stopped)
 
@@ -259,6 +274,10 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
             # Ce a comandat rularea curentă — după un restart HA care a sărit peste
             # final, exact aceste entități trebuie închise.
             "run_entities": sorted(self._commanded) if self.state_name in RUN_STATES else [],
+            "overrides": {
+                entity_id: {"since": item["since"].isoformat(), "sig": item["sig"]}
+                for entity_id, item in sorted(self._overrides.items())
+            },
         }
 
     async def _save_store(self) -> None:
@@ -314,6 +333,7 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
         self._cache["resolved_season"] = self._resolved_season
         self._cache["manual_occ"] = self._manual_occ
         self._cache["force_key"] = self._force_key
+        self._cache["overrides"] = self._overrides
 
     def _ts(self) -> float:
         """Ceasul politicii de gardă (epoch) — un singur punct, injectabil în teste."""
@@ -387,7 +407,9 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
                     active["tainted"] = True
                 self._recommand = True
                 self._request_tick()
-        if changed and key == VAL_ENABLED and value:
+        if changed and (
+            (key == VAL_ENABLED and value) or key in (VAL_IDLE_RESET_ON, VAL_IDLE_RESET_MIN)
+        ):
             self._request_tick()
         self.recompute()
 
@@ -544,6 +566,10 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
                         "rulare rămasă neînchisă înainte de restart",
                         touched=self._orphan_entities,
                     )
+            try:
+                await self._idle_watch(now)
+            except Exception:  # noqa: BLE001 — siguranța nu are voie să oprească bucla
+                _LOGGER.exception("Verificarea pornirilor manuale a eșuat (continui)")
             self._sync_cache()
             self._persist()
             return self._build_data()
@@ -1367,6 +1393,109 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
             kind="fighting",
         )
 
+    # ------------------------------------- siguranță: porniri manuale uitate (IDLE)
+    def _rest_temp(self) -> float | None:
+        """Setpoint-ul de repaus al centralei; None ⇒ repausul ei e „oprită"."""
+        if not self.get_bool(VAL_BOILER_SETBACK_ON, True):
+            return None
+        return self.get_float(VAL_BOILER_SETBACK, DEFAULT_BOILER_SETBACK_C)
+
+    def _override_probe(self, entity_id: str) -> tuple[bool | None, list | None]:
+        """(pornit manual?, semnătura [mod, setpoint]). None ⇒ stare necunoscută.
+        O semnătură nouă repornește cronometrul (cineva e prezent și reglează)."""
+        state = self.hass.states.get(entity_id)
+        if state is None:
+            return None, None
+        temperature = state.attributes.get("temperature")
+        over = guard.is_manual_override(
+            {"hvac_mode": state.state, "temperature": temperature},
+            is_boiler=entity_id == self.boiler,
+            rest_temp=self._rest_temp(),
+        )
+        return over, ([state.state, temperature] if over else None)
+
+    def _idle_limit(self) -> dt.timedelta:
+        return dt.timedelta(
+            minutes=self.get_float(VAL_IDLE_RESET_MIN, DEFAULT_IDLE_RESET_MIN)
+        )
+
+    async def _idle_watch(self, now: dt.datetime) -> None:
+        """În afara evenimentelor: un aparat pornit/urcat de mână și uitat revine pe
+        repaus după „Durată maximă pornire manuală" de la ULTIMA modificare.
+
+        Fără asta, o centrală urcată de pe termostat ar merge până la următorul
+        eveniment programat (posibil zile). Rulările gestionate nu sunt atinse."""
+        if (
+            self.state_name != STATE_IDLE
+            or not self.get_bool(VAL_ENABLED, True)
+            or not self.get_bool(VAL_IDLE_RESET_ON, True)
+        ):
+            self._overrides.clear()
+            return
+        if not self._ha_running():
+            return  # stările aparatelor nu sunt încă de încredere
+        limit = self._idle_limit()
+        expired: list[str] = []
+        for entity_id in self.all_actuators():
+            over, sig = self._override_probe(entity_id)
+            if over is None:
+                continue  # indisponibil — cronometrul rămâne cum era
+            if not over:
+                self._overrides.pop(entity_id, None)
+                continue
+            item = self._overrides.get(entity_id)
+            if item is None or item["sig"] != sig:
+                _LOGGER.info(
+                    "Pornire manuală pe %s (%s) — revine pe repaus în %.0f min",
+                    entity_id, sig, limit.total_seconds() / 60.0,
+                )
+                self._overrides[entity_id] = {"since": now, "sig": sig}
+            elif now - item["since"] >= limit:
+                expired.append(entity_id)
+        if expired:
+            await self._reset_overrides(now, expired, limit)
+
+    async def _reset_overrides(
+        self, now: dt.datetime, entities: list[str], limit: dt.timedelta
+    ) -> None:
+        """Readuce pe repaus aparatele uitate pornite: AC-urile → off, centrala →
+        temperatura de așteptare (sau off, dacă așteptarea e dezactivată)."""
+        gen = self._gen
+        async with self._cmd_lock:
+            if gen != self._gen or self.state_name != STATE_IDLE:
+                return
+            _LOGGER.info("Pornire manuală uitată — readuc pe repaus: %s", entities)
+            boiler_due = self.boiler is not None and self.boiler in entities
+            setback = boiler_due and self._rest_temp() is not None
+            off = [e for e in entities if e != self.boiler or not setback]
+            if off:
+                await self.async_all_off(off)
+            if setback:
+                await self._boiler_to_setback()
+        done: list[str] = []
+        for entity_id in entities:
+            if self._override_probe(entity_id)[0]:
+                # Comanda n-a prins (eroarea e deja notificată) — reîncercare mai târziu.
+                self._overrides[entity_id]["since"] = (
+                    now - limit + dt.timedelta(minutes=IDLE_RESET_RETRY_MIN)
+                )
+            else:
+                self._overrides.pop(entity_id, None)
+                done.append(entity_id)
+        if done:
+            names = ", ".join(self._friendly(e) for e in done)
+            self._notify(
+                "ClimateFlow — pornire manuală resetată",
+                f"{names}: pornit manual în afara unui eveniment și neatins de "
+                f"{limit.total_seconds() / 60.0:.0f} min — l-am readus pe starea de repaus.",
+                kind="idle_reset",
+            )
+
+    def _friendly(self, entity_id: str) -> str:
+        state = self.hass.states.get(entity_id)
+        name = state.attributes.get("friendly_name") if state is not None else None
+        return str(name or entity_id)
+
     # ------------------------------------------------ comenzi sigure către climate
     async def _climate_call(self, service: str, data: dict) -> bool:
         """Comandă climate cu timeout. NU aruncă niciodată; False la eșec."""
@@ -1826,6 +1955,15 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
                 and (next_any["key"] in self._skips or next_any["key"] in self._stopped)
             ),
             "skips": sorted(self._skips),
+            "manual_overrides": [
+                {
+                    "entity_id": entity_id,
+                    "name": self._friendly(entity_id),
+                    "since": item["since"].isoformat(),
+                    "resets_at": (item["since"] + self._idle_limit()).isoformat(),
+                }
+                for entity_id, item in self._overrides.items()
+            ],
         }
 
     @callback

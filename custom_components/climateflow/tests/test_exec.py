@@ -31,6 +31,8 @@ from custom_components.climateflow.const import (  # noqa: E402
     VAL_EXTREME_HEAT,
     VAL_FAN_CAP,
     VAL_GUARD,
+    VAL_IDLE_RESET_MIN,
+    VAL_IDLE_RESET_ON,
     VAL_MAX_LEAD,
     VAL_NOTIFY,
     VAL_OVERSHOOT,
@@ -154,6 +156,8 @@ def make_coordinator(hass, *, season=SEASON_WINTER, indoor=19.0, outdoor=5.0,
         # pornit explicit unde se testează temperatura de așteptare.
         VAL_BOILER_SETBACK_ON: False,
         VAL_BOILER_SETBACK: 18.0,
+        VAL_IDLE_RESET_ON: True,
+        VAL_IDLE_RESET_MIN: 120.0,
     }
     c.state_name = STATE_IDLE
     c._active = None
@@ -161,6 +165,7 @@ def make_coordinator(hass, *, season=SEASON_WINTER, indoor=19.0, outdoor=5.0,
     c._resolved_season = season
     c._manual_occ = None
     c._force_key = None
+    c._overrides = {}
     c._stopped = set()
     c._failed = set()
     c._gen = 0
@@ -1156,5 +1161,174 @@ def test_repeated_start_boost_suggests_raising_max_lead():
             # Avansul maxim crescut destul → sugestia dispare.
             c.values[VAL_MAX_LEAD] = 330.0
             assert c.history()["suggestion"] is None
+
+    asyncio.run(main())
+
+
+# ------------------------------------------- siguranță: porniri manuale uitate
+async def idle_tick(c, now):
+    """Tick complet în repaus: state machine + verificarea pornirilor manuale."""
+    await tick(c, now)
+    await c._idle_watch(now)
+
+
+def _sat(hh, mm=0):
+    """Sâmbătă 7 nov 2026 — niciun eveniment în zonă."""
+    return dt.datetime(2026, 11, 7, hh, mm, tzinfo=UTC)
+
+
+def test_forgotten_boiler_returns_to_setback_after_limit():
+    async def main():
+        hass = FakeHass()
+        c = make_coordinator(hass)
+        c.values[VAL_BOILER_SETBACK_ON] = True
+        hass.states.set("climate.boiler", "heat", {"temperature": 18.0})
+        await idle_tick(c, _sat(9, 0))
+        assert c._overrides == {}  # pe așteptare = repaus
+
+        hass.states.set("climate.boiler", "heat", {"temperature": 23.0})  # urcată de mână
+        await idle_tick(c, _sat(10, 0))
+        await idle_tick(c, _sat(11, 59))
+        assert hass.services.calls == []  # încă în termen — neatinsă
+
+        await idle_tick(c, _sat(12, 0))
+        boiler = hass.states.get("climate.boiler")
+        assert boiler.state == "heat" and boiler.attributes["temperature"] == 18.0
+        assert hass.services.of("turn_off") == []  # AC-urile erau deja oprite
+        assert c._overrides == {}
+        assert [k for k, _, _ in c.notifications] == ["idle_reset"]
+
+        # Sub așteptare sau oprită de mână: nu risipește nimic — nu se atinge.
+        hass.services.calls.clear()
+        hass.states.set("climate.boiler", "heat", {"temperature": 12.0})
+        await idle_tick(c, _sat(13, 0))
+        hass.states.set("climate.boiler", "off")
+        await idle_tick(c, _sat(16, 0))
+        assert c._overrides == {} and hass.services.calls == []
+
+    asyncio.run(main())
+
+
+def test_new_manual_change_restarts_the_timer_and_self_revert_cancels_it():
+    async def main():
+        hass = FakeHass()
+        c = make_coordinator(hass)
+        c.values[VAL_BOILER_SETBACK_ON] = True
+        hass.states.set("climate.boiler", "heat", {"temperature": 22.0})
+        await idle_tick(c, _sat(10, 0))
+        hass.states.set("climate.boiler", "heat", {"temperature": 23.0})  # încă un grad
+        await idle_tick(c, _sat(11, 40))
+        await idle_tick(c, _sat(13, 39))  # 219 min de la prima, 119 de la ultima
+        assert hass.services.calls == []
+        await idle_tick(c, _sat(13, 40))
+        assert hass.states.get("climate.boiler").attributes["temperature"] == 18.0
+
+        # Cineva pornește și apoi coboară singur → cronometrul dispare, nicio comandă.
+        hass.services.calls.clear()
+        hass.states.set("climate.boiler", "heat", {"temperature": 22.0})
+        await idle_tick(c, _sat(14, 0))
+        assert "climate.boiler" in c._overrides
+        hass.states.set("climate.boiler", "heat", {"temperature": 18.0})
+        await idle_tick(c, _sat(15, 0))
+        await idle_tick(c, _sat(18, 0))
+        assert c._overrides == {} and hass.services.calls == []
+
+    asyncio.run(main())
+
+
+def test_forgotten_ac_is_turned_off_and_unavailable_keeps_timer():
+    async def main():
+        hass = FakeHass()
+        c = make_coordinator(hass, season=SEASON_SUMMER, indoor=27.0, outdoor=32.0)
+        hass.states.set("climate.ac1", "cool", {"temperature": 20.0})  # telecomandă
+        await idle_tick(c, _sat(10, 0))
+        hass.states.set("climate.ac1", "unavailable")
+        await idle_tick(c, _sat(11, 0))
+        assert "climate.ac1" in c._overrides  # integrare căzută: cronometrul rămâne
+        hass.states.set("climate.ac1", "cool")
+        await idle_tick(c, _sat(12, 0))
+        assert hass.states.get("climate.ac1").state == "off"
+        assert hass.services.of("turn_off")[0][2]["entity_id"] == ["climate.ac1"]
+        assert hass.states.get("climate.boiler").state == "off"  # centrala neatinsă
+
+        # Așteptare dezactivată ⇒ repausul centralei e „oprită".
+        hass.states.set("climate.boiler", "heat", {"temperature": 15.0})
+        await idle_tick(c, _sat(13, 0))
+        await idle_tick(c, _sat(15, 0))
+        assert hass.states.get("climate.boiler").state == "off"
+
+    asyncio.run(main())
+
+
+def test_idle_reset_respects_switches_and_managed_runs():
+    async def main():
+        # Comutatorul siguranței oprit / sistem dezactivat ⇒ nimic.
+        for key in (VAL_IDLE_RESET_ON, VAL_ENABLED):
+            hass = FakeHass()
+            c = make_coordinator(hass)
+            c.values[key] = False
+            hass.states.set("climate.ac1", "heat", {"temperature": 24.0})
+            await idle_tick(c, _sat(10, 0))
+            await idle_tick(c, _sat(20, 0))
+            assert hass.services.calls == [] and c._overrides == {}
+
+        # AC pornit de mână înaintea unei rulări: rularea preia controlul, iar după
+        # cooldown cronometrul pornește proaspăt (nu moștenește timpul de dinainte).
+        hass = FakeHass()
+        c = make_coordinator(hass)
+        hass.states.set("climate.ac1", "heat", {"temperature": 24.0})
+        await idle_tick(c, _at(14, 0))
+        assert "climate.ac1" in c._overrides
+        await idle_tick(c, _at(15, 45))
+        assert c.state_name == STATE_PRECONDITIONING and c._overrides == {}
+        hass.states.set("sensor.indoor", "22.0")  # la țintă — fără boost în eveniment
+        await idle_tick(c, _at(18, 0))
+        await idle_tick(c, _at(19, 0))  # 5 h de la pornirea manuală — rulare, nu se atinge
+        assert hass.states.get("climate.ac1").state == "heat"
+        await idle_tick(c, _at(19, 30))
+        await c._cooldown_task
+        await idle_tick(c, _at(19, 31))
+        assert c._overrides["climate.ac1"]["since"] == _at(19, 31)
+        await idle_tick(c, _at(21, 31))
+        assert hass.states.get("climate.ac1").state == "off"
+
+    asyncio.run(main())
+
+
+def test_idle_reset_failure_retries_later_and_timer_survives_restart():
+    async def main():
+        hass = FakeHass()
+        c = make_coordinator(hass)
+        hass.states.set("climate.ac1", "heat", {"temperature": 24.0})
+        await idle_tick(c, _sat(10, 0))
+        hass.services.fail = {"turn_off"}
+        await idle_tick(c, _sat(12, 0))
+        assert hass.states.get("climate.ac1").state == "heat"
+        assert "idle_reset" not in [k for k, _, _ in c.notifications]
+        attempts = len(hass.services.of("turn_off"))
+        await idle_tick(c, _sat(12, 5))
+        assert len(hass.services.of("turn_off")) == attempts  # nu la fiecare tick
+        hass.services.fail = set()
+        await idle_tick(c, _sat(12, 10))
+        assert hass.states.get("climate.ac1").state == "off"
+
+        # Restart HA: cronometrul vine din Store, nu o ia de la zero.
+        hass = FakeHass()
+        c = make_coordinator(hass)
+        hass.states.set("climate.ac1", "heat", {"temperature": 24.0})
+        await idle_tick(c, _sat(10, 0))
+        saved = c._snapshot()
+
+        hass2 = FakeHass()
+        c2 = make_coordinator(hass2)
+        hass2.states.set("climate.ac1", "heat", {"temperature": 24.0})
+
+        async def _load():
+            return saved
+
+        c2._store = SimpleNamespace(async_load=_load)
+        await c2.async_load_store()
+        await idle_tick(c2, _sat(12, 0))
+        assert hass2.states.get("climate.ac1").state == "off"
 
     asyncio.run(main())

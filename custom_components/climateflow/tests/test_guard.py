@@ -5,7 +5,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from guard import GuardPolicy, deviations  # noqa: E402
+from guard import GuardPolicy, deviations, is_manual_override  # noqa: E402
 
 
 CMD = {"hvac_mode": "heat", "temperature": 22.5, "fan_mode": "low"}
@@ -84,3 +84,32 @@ def test_reset_clears_history():
     p.reset()
     assert p.should_check("climate.a", 21.0) is True
     assert p.note_reassert("climate.a", 22.0) is True
+
+
+# ---------------------------------------------------------- is_manual_override
+def test_manual_override_ac():
+    assert is_manual_override({"hvac_mode": "cool"}, is_boiler=False, rest_temp=18.0) is True
+    assert is_manual_override({"hvac_mode": "off"}, is_boiler=False, rest_temp=18.0) is False
+    # Integrare căzută: nu știm — nu se atinge.
+    assert is_manual_override({"hvac_mode": "unavailable"}, is_boiler=False, rest_temp=None) is None
+
+
+def test_manual_override_boiler_with_setback():
+    def boiler(temp, mode="heat"):
+        return is_manual_override(
+            {"hvac_mode": mode, "temperature": temp}, is_boiler=True, rest_temp=18.0
+        )
+
+    assert boiler(23.0) is True
+    assert boiler(18.5) is False  # în toleranță
+    assert boiler(18.0) is False
+    assert boiler(12.0) is False  # sub așteptare nu risipește nimic
+    assert boiler(23.0, mode="off") is False
+    assert boiler(None) is None  # pornită, dar fără setpoint raportat
+
+
+def test_manual_override_boiler_without_setback():
+    # Așteptarea dezactivată ⇒ repausul e „oprită": orice pornire e manuală.
+    on = {"hvac_mode": "heat", "temperature": 10.0}
+    assert is_manual_override(on, is_boiler=True, rest_temp=None) is True
+    assert is_manual_override({"hvac_mode": "off"}, is_boiler=True, rest_temp=None) is False

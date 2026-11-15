@@ -31,6 +31,8 @@ from .const import (
     VAL_EXTREME_HEAT,
     VAL_FAN_CAP,
     VAL_GUARD,
+    VAL_IDLE_RESET_MIN,
+    VAL_IDLE_RESET_ON,
     VAL_MAX_LEAD,
     VAL_NOTIFY,
     VAL_OVERSHOOT,
@@ -108,6 +110,8 @@ def _controls(hass: HomeAssistant, entry: ConfigEntry) -> dict:
         "extreme_heat": eid("number", VAL_EXTREME_HEAT),
         "boiler_setback_on": eid("switch", VAL_BOILER_SETBACK_ON),
         "boiler_setback": eid("number", VAL_BOILER_SETBACK),
+        "idle_reset_on": eid("switch", VAL_IDLE_RESET_ON),
+        "idle_reset_min": eid("number", VAL_IDLE_RESET_MIN),
     }
 
 
