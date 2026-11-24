@@ -261,16 +261,26 @@ def test_idle_before_window_precondition_inside():
     asyncio.run(main())
 
 
-def test_winter_boost_when_boiler_too_slow():
+def test_winter_boiler_first_even_when_max_lead_is_not_enough():
     async def main():
         hass = FakeHass()
-        # indoor 15 → needed 7°C; rata necesară în 180 min = 2.33 > 1.5 ⇒ boost din start.
+        # indoor 15 → needed 7°C; rata necesară în 180 min = 2.33 > 1.5. Centrala întâi:
+        # pornim la avansul maxim DOAR cu ea (fără boost din start) și consemnăm.
         c = make_coordinator(hass, indoor=15.0)
+        assert c._plan(c._occurrences(_at(12, 0))[0], _at(12, 0))["lead"] == 180.0
         await tick(c, _at(15, 30))
         assert c.state_name == STATE_PRECONDITIONING
-        assert c._active["plan"]["mode"] == MODE_HEAT_BOOST
+        assert c._active["plan"]["mode"] == MODE_HEAT_BOILER
         commanded = {call[2]["entity_id"] for call in hass.services.of("set_hvac_mode")}
-        assert commanded == {"climate.boiler", "climate.ac1", "climate.ac2"}
+        assert commanded == {"climate.boiler"}
+        assert c._records[-1]["type"] == "lead_capped"
+        assert c._records[-1]["needed_min"] == 322
+
+        # Aerele intră abia când proiecția arată un deficit peste toleranță:
+        # 15° + 1.5 °C/h × 2 h = 18° < 22 − 0.7.
+        await tick(c, _at(16, 0))
+        assert c._active["escalated"] is True
+        assert c._active["plan"]["mode"] == MODE_HEAT_BOOST
 
     asyncio.run(main())
 
@@ -849,23 +859,25 @@ def test_escalation_teaches_boiler_rate_so_next_lead_is_longer():
         await tick(c, _at(16, 5))
         assert c._active["lag_at"] == _at(16, 5)
 
-        # După 45 min centrala a urcat doar 0.3° → escaladare + rata ei reală e învățată.
+        # După o oră centrala a urcat doar 0.3° → proiecția la start rămâne mult sub
+        # țintă → escaladare + rata ei reală e învățată.
         hass.states.set("sensor.indoor", "19.3")
-        await tick(c, _at(16, 30))
+        await tick(c, _at(16, 45))
         assert c._active["escalated"] is True
         assert c._active["plan"]["mode"] == MODE_HEAT_BOOST
         learned = c._rates[MODE_HEAT_BOILER]["b3"]
-        # De la prima mișcare: 0.1° în 25 min = 0.24 °C/h, amestecat (EMA 30%) cu rata
-        # planificată 1.5 → 1.12. Inerția (20 min) se învață separat.
-        assert round(learned, 2) == 1.12
-        assert c._samples[-1]["rate"] == 0.24
+        # De la prima mișcare: 0.1° în 40 min = 0.15 °C/h. Centrala n-a ajuns la timp și
+        # rata e sub cea planificată (1.5) → corecție rapidă: rata ia DIRECT valoarea
+        # măsurată, nu doar 30% spre ea. Inerția (20 min) se învață separat.
+        assert round(learned, 2) == 0.15
+        assert c._samples[-1]["rate"] == 0.15
         assert c._lags[MODE_HEAT_BOILER] == 20.0
 
         # Restul rulării (boost) se învață separat, pe modul boost.
         hass.states.set("sensor.indoor", "22.0")
         await tick(c, _at(18, 0))
         assert c._samples[-1]["mode"] == MODE_HEAT_BOOST
-        assert c._samples[-1]["rate"] == 1.8  # 2.7° în 90 min
+        assert c._samples[-1]["rate"] == 2.16  # 2.7° în 75 min
         assert MODE_HEAT_BOOST not in c._lags  # inerția boost-ului nu se deduce de aici
         assert c._rates[MODE_HEAT_BOILER]["b3"] == learned  # neatins de porțiunea de boost
 
@@ -950,10 +962,12 @@ def test_window_error_rejects_silent_invalid_events():
 def test_boiler_goes_to_setback_instead_of_off():
     async def main():
         hass = FakeHass()
-        c = make_coordinator(hass, indoor=15.0)  # boost: centrală + AC-uri
+        c = make_coordinator(hass, indoor=15.0)
         c.values[VAL_BOILER_SETBACK_ON] = True
         c.values[VAL_BOILER_SETBACK] = 18.5
         await tick(c, _at(15, 30))
+        await tick(c, _at(16, 0))  # deficit mare proiectat → boost: centrală + AC-uri
+        assert c._active["plan"]["mode"] == MODE_HEAT_BOOST
         hass.states.set("sensor.indoor", "22.0")
         await tick(c, _at(18, 0))
         hass.services.calls.clear()
@@ -1098,11 +1112,27 @@ def test_escalation_uses_observed_rate_when_building_is_faster_than_planned():
         await tick(c, _at(15, 42))
         hass.states.set("sensor.indoor", "19.2")
         await tick(c, _at(16, 10))  # prima mișcare (inerție lungă: 28 min)
-        # După rata PLANIFICATĂ ar fi în urmă (2.0° / 1.5 = 80 min > 74 rămase)…
+        # Sala urcă doar cu 0.67 °C/h (0.4° în 36 min): proiecția la start e
+        # 19.6 + 0.67 × 74/60 = 20.4° < 22 − 0.7 → escaladează.
+        hass.states.set("sensor.indoor", "19.6")
+        await tick(c, _at(16, 46))
+        assert c._active["escalated"] is True
+
+        # Întârziere mică: la 1.33 °C/h observat proiecția e 21.6° — sub țintă (ETA
+        # depășește startul cu ~16 min), dar în toleranța de confort → aerele NU pornesc.
+        hass = FakeHass()
+        c = make_coordinator(hass, indoor=19.0)
+        c._rates = {MODE_HEAT_BOILER: {"b3": 1.5}}
+        await tick(c, _at(15, 42))
+        hass.states.set("sensor.indoor", "19.2")
+        await tick(c, _at(16, 10))
         hass.states.set("sensor.indoor", "20.0")
         await tick(c, _at(16, 46))
-        # …dar sala urcă acum cu 1.33 °C/h… tot insuficient → escaladează corect.
-        assert c._active["escalated"] is True
+        assert c._active["escalated"] is False
+        assert not [
+            call for call in hass.services.of("set_hvac_mode")
+            if call[2]["entity_id"] != "climate.boiler"
+        ]
 
         hass = FakeHass()
         c = make_coordinator(hass, indoor=19.0)
@@ -1149,17 +1179,68 @@ def test_slow_run_without_backup_still_teaches_rate():
     asyncio.run(main())
 
 
-def test_repeated_start_boost_suggests_raising_max_lead():
+def test_late_boiler_run_corrects_rate_at_once_and_good_run_slowly():
+    async def main():
+        # Centrala singură, ținta neatinsă nici în toleranță la ora evenimentului:
+        # rata ia direct valoarea măsurată, deci următorul avans e deja mai lung.
+        hass = FakeHass()
+        c = make_coordinator(hass, indoor=19.0)
+        c.ac_units = []
+        c._rates = {MODE_HEAT_BOILER: {"b3": 1.5}}
+        await tick(c, _at(15, 42))
+        hass.states.set("sensor.indoor", "19.2")
+        await tick(c, _at(16, 0))
+        hass.states.set("sensor.indoor", "20.4")
+        await tick(c, _at(18, 0))
+        assert c._records[-1]["on_time"] is False
+        assert round(c._rates[MODE_HEAT_BOILER]["b3"], 2) == 0.6  # 1.2° în 120 min
+        await tick(c, _at(19, 30))
+        await c._cooldown_task
+        nxt = _at(12, 0) + dt.timedelta(days=7)
+        hass.states.set("sensor.indoor", "19.0")
+        assert c._plan(c._occurrences(nxt)[0], nxt)["lead"] == 180.0  # plafonat (era 138)
+
+        # Rulare reușită (ținta atinsă): pasul rămâne lent, 30% spre rata măsurată.
+        hass = FakeHass()
+        c = make_coordinator(hass, indoor=19.0)
+        c._rates = {MODE_HEAT_BOILER: {"b3": 1.5}}
+        await tick(c, _at(15, 42))
+        hass.states.set("sensor.indoor", "19.2")
+        await tick(c, _at(16, 0))
+        hass.states.set("sensor.indoor", "22.0")
+        await tick(c, _at(17, 30))
+        await tick(c, _at(18, 0))
+        assert c._records[-1]["on_time"] is True
+        # 2.8° în 90 min = 1.87 °C/h → 1.5 + 0.3 × 0.37 = 1.61
+        assert round(c._rates[MODE_HEAT_BOILER]["b3"], 2) == 1.61
+
+        # Întârziat, dar rata măsurată e PESTE cea memorată → nu sare în sus, pas lent.
+        hass = FakeHass()
+        c = make_coordinator(hass, indoor=19.0)
+        c.ac_units = []
+        c._rates = {MODE_HEAT_BOILER: {"b3": 0.4}}
+        await tick(c, _at(15, 0))
+        hass.states.set("sensor.indoor", "19.2")
+        await tick(c, _at(16, 0))
+        hass.states.set("sensor.indoor", "20.4")
+        await tick(c, _at(18, 0))
+        assert c._records[-1]["on_time"] is False
+        assert round(c._rates[MODE_HEAT_BOILER]["b3"], 2) == 0.46  # 0.4 + 0.3 × (0.6 − 0.4)
+
+    asyncio.run(main())
+
+
+def test_repeated_capped_lead_suggests_raising_max_lead():
     async def main():
         hass = FakeHass()
-        c = make_coordinator(hass, indoor=15.0)  # 7° de recuperat: boost din start
+        c = make_coordinator(hass, indoor=15.0)  # 7° de recuperat: avansul maxim nu ajunge
         with frozen_now(_at(20, 0)):
             for day in (0, 7, 14):
                 start = _at(15, 30) + dt.timedelta(days=day)
                 hass.states.set("sensor.indoor", "15.0")
                 with frozen_now(start):
                     await tick(c, start)
-                    assert c._active["plan"]["mode"] == MODE_HEAT_BOOST
+                    assert c._active["plan"]["mode"] == MODE_HEAT_BOILER
                     await c.async_stop()
                     await c._cooldown_task
                 c._stopped.clear()

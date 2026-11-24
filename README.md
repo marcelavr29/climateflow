@@ -17,8 +17,9 @@ ca la începutul evenimentului temperatura să fie la țintă.
 - **Confort în timpul evenimentului**: menține ținta cu ventilatoarele plafonate la o
   treaptă maximă configurată (fără zgomot/curent). Plafonul e o constrângere fermă;
   dacă temperatura scapă, aprinde senzorul „Confort sub țintă” și notifică.
-- **Iarna**: centrala termică e sursa principală; aerele intră automat ca **boost**
-  pe încălzire când estimarea arată că ținta nu se prinde la timp.
+- **Iarna**: centrala termică e sursa principală; aerele sunt excepția — intră ca **boost**
+  pe încălzire doar când estimarea arată că sala ar rămâne sub țintă cu mai mult decât
+  toleranța de confort (nu pornesc niciodată din start).
 - **Termostat pe senzorul de sală**: AC-urile primesc setpoint extrem (minimul/maximul
   unității) ca termostatul lor intern să nu se „sature" de la propriul aer — sala e
   ținută la țintă de ClimateFlow, pe senzorul real, cu histerezis (pornit/oprit).
@@ -78,7 +79,9 @@ mutat ore, sărit o ocurență, adăugat evenimente unice (nunți etc.).
 Rata e o medie mobilă pe benzi de temperatură exterioară, per mod
 (`cool` / `heat_boiler` / `heat_boiler_boost`), învățată din fiecare precondiționare
 (măsurată până la atingerea țintei; la o escaladare la boost se învață și rata reală a
-centralei singure, ca data viitoare să pornească mai devreme). Până se adună eșantioane, se folosesc ratele implicite (numbers).
+centralei singure, ca data viitoare să pornească mai devreme). Când centrala nu ajunge la
+timp și rata măsurată e sub cea memorată, corecția e imediată (rata ia valoarea măsurată);
+altfel pasul e de 30%. Până se adună eșantioane, se folosesc ratele implicite (numbers).
 
 ## Documentație
 

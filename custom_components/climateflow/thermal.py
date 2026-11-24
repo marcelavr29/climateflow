@@ -30,6 +30,9 @@ BANDS_COOL: list[tuple[float, float, str]] = [
 ]
 
 EMA_ALPHA = 0.3
+# Pasul pentru o rulare în care centrala NU a ajuns la timp și rata măsurată e sub cea
+# planificată: 1.0 = rata ia direct valoarea măsurată (următorul avans e deja corect).
+LATE_ALPHA = 1.0
 MIN_SAMPLE_MINUTES = 15.0
 MIN_SAMPLE_DELTA = 0.3
 MAX_SANE_RATE = 10.0  # °C/h — peste asta e glitch de senzor, nu fizică

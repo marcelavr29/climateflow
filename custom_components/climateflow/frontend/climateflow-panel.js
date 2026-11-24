@@ -538,9 +538,11 @@ class ClimateFlowPanel extends HTMLElement {
     if (h && h.error) history = `<div class="err">⚠️ ${esc(h.error)}</div>`;
     else if (h) {
       const rows = (h.records || [])
-        .filter((r) => r.type === "precondition" || r.type === "boost")
+        .filter((r) => r.type === "precondition" || r.type === "boost" || r.type === "lead_capped")
         .map((r) => {
           const d = r.ts ? new Date(r.ts).toLocaleString("ro-RO", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
+          if (r.type === "lead_capped")
+            return `<tr><td>${esc(d)}</td><td colspan="4">⏱ avans maxim atins — ${esc(r.name || "")} <span class="muted">(centralei i-ar trebui ~${fmt(r.needed_min, " min", 0)})</span></td></tr>`;
           if (r.type === "boost")
             return `<tr><td>${esc(d)}</td><td colspan="4">⚡ boost activat — ${esc(r.name || "")} <span class="muted">(${r.phase === "event" ? "în timpul evenimentului" : r.phase === "start" ? "din start — avansul maxim nu ajunge centralei" : "în precondiționare"})</span></td></tr>`;
           const ok = r.on_time == null ? "—" : r.on_time ? `<span class="ok">✓ la timp</span>` : `<span class="late">✗ întârziat</span>`;
@@ -555,10 +557,10 @@ class ClimateFlowPanel extends HTMLElement {
     const stats = (h && h.stats) || {};
     const sug = h && h.suggestion;
     const sugHtml = sug
-      ? `<div class="card" style="border-left:4px solid #ffb300">💡 Boost-ul a pornit din start de
+      ? `<div class="card" style="border-left:4px solid #ffb300">💡 Precondiționarea a pornit la avansul maxim de
            ${sug.count} ori în ultimele 30 de zile: centrala singură ar avea nevoie de
            ~<b>${fmt(sug.needed_min, " min", 0)}</b>, iar „Avans maxim” e <b>${fmt(sug.max_lead, " min", 0)}</b>.
-           Crește „Avans maxim” (Setări) dacă vrei să pornească mai devreme în loc de boost.</div>`
+           Crește „Avans maxim” (Setări) ca să pornească mai devreme și să nu fie nevoie de aere.</div>`
       : "";
     return `
       ${sugHtml}

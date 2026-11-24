@@ -509,25 +509,17 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
             lead = max_lead
         else:
             lead = thermal.lead_minutes(needed, rate, max_lead, lag_min=lag)
-            # Iarna: dacă nici avansul maxim nu ajunge cu centrala singură → boost cu AC-urile.
+            # Iarna: centrala întâi. Dacă nici avansul maxim nu-i ajunge, pornim TOT doar
+            # cu ea, la avansul maxim (aerele rămân excepția — intră doar dacă proiecția
+            # arată un deficit peste toleranță, vezi escaladarea) și consemnăm cât i-ar
+            # trebui, ca bază pentru sugestia de „Avans maxim".
             if (
                 season == SEASON_WINTER
                 and mode == MODE_HEAT_BOILER
-                and self.ac_units
                 and lead >= max_lead
                 and rate < thermal.required_rate(needed, max_lead - lag)
             ):
-                # Cât i-ar trebui centralei singure — baza sugestiei de „Avans maxim".
                 boiler_need_min = round(thermal.needed_minutes(needed, rate, lag_min=lag))
-                mode = MODE_HEAT_BOOST
-                boost_rate = (
-                    thermal.effective_rate(self._rates, mode, band, default_rate)
-                    if band is not None
-                    else default_rate
-                )
-                lag = _num(self._lags.get(mode), 0.0)
-                lead = thermal.lead_minutes(needed, boost_rate, max_lead, lag_min=lag)
-                rate = boost_rate
 
         return {
             "mode": mode,
@@ -652,7 +644,7 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
         if self._active is not active:
             return  # oprit în timpul comenzilor
         if plan.get("boiler_need_min"):
-            self._note_start_boost(now, active, plan)
+            self._note_lead_capped(now, active, plan)
         self._notify(
             "ClimateFlow — precondiționare",
             f"Am pornit climatizarea pentru „{occ['name']}” "
@@ -720,7 +712,9 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
                 active["lag_at"] = now if clean else None
                 active["lag_temp"] = indoor
                 active["lag_mode"] = plan["mode"]
-        # Escaladare unică la boost dacă ETA proiectat depășește startul evenimentului.
+        # Escaladare unică la boost DOAR dacă temperatura proiectată la startul
+        # evenimentului rămâne sub țintă cu mai mult decât toleranța de confort (aerele
+        # sunt excepția: o întârziere de câteva minute nu le pornește).
         # Nu în primele minute: caloriferele au inerție, iar o escaladare imediată n-ar
         # lăsa nici măcar un eșantion din care să învățăm rata centralei.
         elapsed_min = (now - active["precond_start"]).total_seconds() / 60.0
@@ -749,9 +743,14 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
                         )
                 elif "lag_at" not in active:
                     pending_lag = max(0.0, plan.get("lag", 0.0) - elapsed_min)
-                eta_min = needed / rate_eff * 60.0 + pending_lag
-                if eta_min > remaining_min + 5.0:
-                    _LOGGER.info("Escaladez la boost: ETA %.0f min > rămas %.0f min", eta_min, remaining_min)
+                tolerance = self.get_float(VAL_TOLERANCE, DEFAULT_TOLERANCE_C)
+                heating_min = max(remaining_min - pending_lag, 0.0)
+                projected = indoor + rate_eff * heating_min / 60.0
+                if projected < plan["target"] - tolerance:
+                    _LOGGER.info(
+                        "Escaladez la boost: proiecție %.1f° la start < țintă %.1f° − toleranță %.1f°",
+                        projected, plan["target"], tolerance,
+                    )
                     # Centrala singură a fost prea lentă: ÎNVĂȚĂM asta acum, altfel
                     # rata ei rămâne optimistă și data viitoare pornim la fel de târziu.
                     self._learn_slow_boiler(now, active, indoor, elapsed_min)
@@ -977,13 +976,23 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
         )
 
     # ---------------------------------------------------------------- învățare
-    def _learn_pessimistic(self, mode: str, band: str, rate: float, plan_rate: float) -> None:
+    def _learn_pessimistic(
+        self, mode: str, band: str, rate: float, plan_rate: float,
+        alpha: float = thermal.EMA_ALPHA,
+    ) -> None:
         """EMA cu un eșantion „prea lent". Dacă banda n-are încă istoric, nu o seedăm
         direct cu el (e pesimist), ci corectăm rata cu care s-a planificat."""
         rates = self._rates
         if band not in (rates.get(mode) or {}):
             rates = thermal.update_rate(rates, mode, band, plan_rate)
-        self._rates = thermal.update_rate(rates, mode, band, rate)
+        self._rates = thermal.update_rate(rates, mode, band, rate, alpha)
+
+    def _late_alpha(self, mode: str, band: str, rate: float, plan_rate: float) -> float:
+        """Pasul de învățare pentru o rulare în care centrala NU a ajuns la timp: dacă
+        rata măsurată e sub cea cu care planificăm, corecția e rapidă (altfel următoarea
+        pornire ar fi la fel de târzie); o măsurătoare mai bună rămâne pe pasul lent."""
+        known = (self._rates.get(mode) or {}).get(band, plan_rate)
+        return thermal.LATE_ALPHA if rate < known else thermal.EMA_ALPHA
 
     def _sensor_reported_since(self, since: dt.datetime) -> bool:
         """Senzorul de sală a raportat ceva de la `since`? (altfel „fără progres" poate
@@ -992,22 +1001,30 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
         last = getattr(state, "last_reported", None) or getattr(state, "last_updated", None)
         return last is not None and last > since
 
-    def _note_start_boost(self, now: dt.datetime, active: dict, plan: dict) -> None:
-        """Boost din start = centrala n-ajunge nici cu avansul maxim. Consemnăm și,
+    def _note_lead_capped(self, now: dt.datetime, active: dict, plan: dict) -> None:
+        """Avans plafonat = centrala n-ajunge nici cu avansul maxim. Consemnăm și,
         dacă se repetă, sugerăm creșterea „Avans maxim" (învățarea nu mai are ce face)."""
         max_lead = self.get_float(VAL_MAX_LEAD, DEFAULT_MAX_LEAD_MIN)
-        self._record_boost(
-            now, active, "start", needed_min=plan["boiler_need_min"], max_lead=max_lead
+        self._records.append(
+            {
+                "type": "lead_capped",
+                "ts": now.isoformat(),
+                "name": active.get("name", ""),
+                "needed_min": plan["boiler_need_min"],
+                "max_lead": max_lead,
+            }
         )
+        self._records = self._records[-200:]
+        self.hass.async_create_task(self._save_learning())
         suggestion = self._max_lead_suggestion(now)
         if suggestion is not None:
             self._notify(
                 "ClimateFlow — avansul maxim e prea mic",
-                f"Aerele au intrat în ajutor din start de {suggestion['count']} ori în "
-                f"ultimele 30 de zile: centrala singură ar avea nevoie de "
+                f"Precondiționarea a pornit la avansul maxim de {suggestion['count']} ori "
+                f"în ultimele 30 de zile: centrala singură ar avea nevoie de "
                 f"~{suggestion['needed_min']:.0f} min, iar „Avans maxim” e "
-                f"{suggestion['max_lead']:.0f} min. Crește „Avans maxim” dacă vrei să "
-                "pornească mai devreme în loc de boost.",
+                f"{suggestion['max_lead']:.0f} min. Crește „Avans maxim” ca să pornească "
+                "mai devreme și să nu fie nevoie de aere.",
                 kind="max_lead",
             )
 
@@ -1015,7 +1032,11 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
         cutoff = now - dt.timedelta(days=30)
         starts = []
         for r in self._records:
-            if r.get("type") != "boost" or r.get("phase") != "start" or not r.get("needed_min"):
+            # „boost din start" = consemnarea versiunilor vechi pentru aceeași situație.
+            capped = r.get("type") == "lead_capped" or (
+                r.get("type") == "boost" and r.get("phase") == "start"
+            )
+            if not capped or not r.get("needed_min"):
                 continue
             ts = dt_util.parse_datetime(r.get("ts", ""))
             if ts is not None and ts >= cutoff:
@@ -1056,7 +1077,11 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
         if rate > thermal.MAX_SANE_RATE:
             return
         band = thermal.band_key(outdoor, MODE_HEAT_BOILER)
-        self._learn_pessimistic(MODE_HEAT_BOILER, band, rate, active["plan"]["rate"])
+        plan_rate = active["plan"]["rate"]
+        self._learn_pessimistic(
+            MODE_HEAT_BOILER, band, rate, plan_rate,
+            alpha=self._late_alpha(MODE_HEAT_BOILER, band, rate, plan_rate),
+        )
         self._add_sample(now, MODE_HEAT_BOILER, band, outdoor, seg_start, indoor, seg_minutes, rate)
         _LOGGER.info(
             "Învățat din escaladare: centrala singură ≈ %.2f °C/h (banda %s)", rate, band
@@ -1149,8 +1174,18 @@ class ClimateFlowCoordinator(DataUpdateCoordinator):
 
         if rate is not None:
             band = thermal.band_key(active["outdoor_start"], mode)
-            if pessimistic:
-                self._learn_pessimistic(mode, band, rate, plan["rate"])
+            # Centrala singură n-a prins ținta (nici în toleranță) până la eveniment:
+            # corecție rapidă în jos, ca următorul avans să fie deja mai lung.
+            late = (
+                mode == MODE_HEAT_BOILER
+                and on_time is False
+                and active.get("reached_at") is None
+            )
+            alpha = (
+                self._late_alpha(mode, band, rate, plan["rate"]) if late else thermal.EMA_ALPHA
+            )
+            if pessimistic or late:
+                self._learn_pessimistic(mode, band, rate, plan["rate"], alpha=alpha)
             else:
                 self._rates = thermal.update_rate(self._rates, mode, band, rate)
             self._add_sample(

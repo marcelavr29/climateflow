@@ -56,6 +56,9 @@ pe oră a urcat sala în realitate și reține valoarea pe **benzi de temperatur
 exterioară** (sub −5°, −5–0°, 0–5°, 5–10°, peste 10°), separat pentru fiecare mod
 (răcire / doar centrala / centrală + aere). Media e „alunecoasă" (EMA): valorile noi
 contează 30%, istoricul 70% — se adaptează, dar nu sare la fiecare măsurătoare.
+Excepția: când **centrala singură n-a ajuns la timp** (ținta ratată peste toleranță sau a
+fost nevoie de aere) și rata măsurată e sub cea memorată, rata ia **direct** valoarea
+măsurată — următoarea pornire e deja mai devreme, nu abia după 3–4 evenimente.
 
 Până se strâng eșantioane, se folosesc **ratele implicite** din Setări. Primele
 săptămâni pot fi imprecise — e normal; urmărește tab-ul Învățare cum se umplu benzile.
@@ -91,23 +94,23 @@ Când e săptămână de tranziție, pe Acasă apare și o notă.
 
 ## Iarna: centrala + aerele (boost)
 
-Centrala e sursa principală de căldură. Aerele intră pe încălzire („boost") în trei
-situații:
+Centrala e sursa principală de căldură, iar aerele sunt excepția. Precondiționarea
+pornește **întotdeauna doar cu centrala** (cel mult la avansul maxim); aerele intră pe
+încălzire („boost") în două situații:
 
-1. **Din start** — dacă și cu avansul maxim centrala singură n-ar prinde ținta
-   (matematic: rata necesară > rata centralei).
-2. **Din mers, în precondiționare** — dacă estimarea arată că ținta nu se atinge la
-   timp (o singură escaladare, nu oscilează; nu în primele 15 minute, cât caloriferele
-   abia se încălzesc). După o jumătate de oră de la prima mișcare, estimarea se face
+1. **Din mers, în precondiționare** — doar dacă estimarea arată că, la ora
+   evenimentului, sala ar rămâne sub țintă cu **mai mult decât toleranța de confort**
+   (o întârziere de câteva minute nu le pornește; o singură escaladare, nu oscilează;
+   nu în primele 15 minute, cât caloriferele abia se încălzesc). După o jumătate de oră de la prima mișcare, estimarea se face
    după **viteza reală** cu care urcă sala, nu după cea presupusă. În acel moment sistemul **învață rata reală a centralei
    singure**, deci data viitoare pornește mai devreme și are mai rar nevoie de boost.
    Porțiunea de boost se învață separat, pe modul „centrală + aere".
-3. **În timpul evenimentului** — dacă temperatura stă sub țintă peste 10 minute; dar
+2. **În timpul evenimentului** — dacă temperatura stă sub țintă peste 10 minute; dar
    aici aerele intră **tot cu ventilatorul plafonat** (confortul rămâne prioritar).
 
 Fiecare boost apare în istoricul din tab-ul Învățare (⚡), ca să vezi cât de des e
-nevoie de el. Dacă boost-ul pornește mereu **din start** (situația 1), învățarea nu
-mai are ce face: centrala nu ajunge nici cu avansul maxim. După trei asemenea porniri
+nevoie de el. Dacă precondiționarea pornește mereu **la avansul maxim** (⏱ în istoric),
+învățarea nu mai are ce face: centrala nu ajunge nici cu avansul maxim. După trei asemenea porniri
 în 30 de zile primești o notificare și o notă în tab-ul Învățare cu avansul de care ar
 avea nevoie centrala singură — crește „Avansul maxim" până acolo.
 
